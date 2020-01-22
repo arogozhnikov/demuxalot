@@ -18,5 +18,6 @@ setup(
         'scipy',
         'numpy',
         'joblib',
+        'pandas',
     ],
 )
