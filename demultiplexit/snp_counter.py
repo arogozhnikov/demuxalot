@@ -1,10 +1,11 @@
-from typing import Tuple
+from typing import Tuple, Dict
 
+import joblib
 import numpy as np
 import pysam
 
 from demultiplexit.cellranger_specific import compute_p_mistake, discard_read
-from demultiplexit.utils import hash_string
+from demultiplexit.utils import hash_string, BarcodeHandler
 
 
 class ChromosomeSNPLookup:
@@ -68,7 +69,7 @@ def compress_cbub_reads_group_to_snips(
         reads,
         snp_lookup: ChromosomeSNPLookup,
         compute_p_read_misaligned,
-        skip_complete_duplicates=True
+        skip_complete_duplicates=True,
 ) -> Tuple[float, dict]:
     """
     Take a group of reads and leaves only information about SNP positions
@@ -110,13 +111,13 @@ def compress_old_cbub_groups(
             if not snp_lookup.snips_exist(
                     min(read.reference_start for read in reads), max(read.reference_end for read in reads) + 1,
             ):
-                # no reads in this fragment, why caring? just forget about it
+                # no SNPs in this fragment, just skip it
                 continue
             p_group_misaligned, snips = compress_cbub_reads_group_to_snips(
                 reads, snp_lookup, compute_p_read_misaligned=compute_p_read_misaligned
             )
             if len(snips) == 0:
-                # there is no reason to care about this one
+                # there is no reason to care about this group, it provides no genotype information
                 continue
             if (cbub not in cbub2qual_and_snps) or (cbub2qual_and_snps[cbub][0] > p_group_misaligned):
                 cbub2qual_and_snps[cbub] = p_group_misaligned, snips
@@ -171,3 +172,38 @@ def count_call_variants_for_chromosome(
         np.inf, cbub2position_and_reads, cbub2qual_and_snps, snp_lookup, compute_p_read_misaligned,
     )
     return cbub2qual_and_snps
+
+
+def count_snps(
+        bamfile_location: str,
+        chromosome2positions: Dict[str, np.ndarray],
+        barcode_handler: BarcodeHandler,
+        joblib_n_jobs=-1,
+        joblib_verbosity=11
+):
+    """
+    Computes which molecules can provide information about SNPs
+    :param bamfile_location: bam file, local path. It's going to be extensively read in multiple threads
+    :param chromosome2positions: which positions are of interest for each chromosome,
+        dictionary mapping chromosome name to np.ndarray of SNP positions within chromosome
+    :param barcode_handler:
+    :param joblib_n_jobs: how many threads to run in parallel
+    :param joblib_verbosity: verbosity level as interpreted by joblib
+
+    :return: returns an object which stores information about molecules, their SNPs and barcodes,
+        that can be used by demultiplexer
+    """
+    chromosome2positions = list(chromosome2positions.items())
+    with joblib.Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity) as parallel:
+        _cbub2qual_and_snps = parallel(
+            joblib.delayed(count_call_variants_for_chromosome)(
+                bamfile_location,
+                chromosome,
+                positions,
+                cellbarcode_compressor=lambda cb: barcode_handler.barcode2index.get(cb, None),
+            )
+            for chromosome, positions in chromosome2positions
+        )
+    chromosome2cbub2qual_and_snps = dict(zip([chrom for chrom, _ in chromosome2positions], _cbub2qual_and_snps))
+    return chromosome2cbub2qual_and_snps
+

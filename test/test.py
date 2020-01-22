@@ -1,5 +1,4 @@
 import json
-import pprint
 from pathlib import Path
 
 import joblib
@@ -11,7 +10,7 @@ from orgalorg.omics.utils import read_vcf_to_header_and_pandas
 from pipeline.Stopwatch import Stopwatch
 
 from demultiplexit.demutiplexit import GenotypesProbComputing
-from demultiplexit.snp_counter import count_call_variants_for_chromosome
+from demultiplexit.snp_counter import count_snps
 from demultiplexit.utils import BarcodeHandler
 
 here = Path(__file__).parent
@@ -19,7 +18,8 @@ here = Path(__file__).parent
 with open(here / 'lane2guessed_donor.json') as f:
     lane2inferred_donor = json.load(f)
 
-samfile = pysam.AlignmentFile(here / 'composed_1_perlane_sorted.bam')
+bamfile_location = str(here / 'composed_1_perlane_sorted.bam')
+bamfile = pysam.AlignmentFile(bamfile_location)
 barcodes_all_lanes = pd.read_csv(here / 'composed_barcodes_1.tsv', header=None)[0].values
 
 with Stopwatch('barcodes'):
@@ -62,21 +62,12 @@ with Stopwatch('update genotypes with new SNPs'):
                 _n_added_snps += 1
     print(f'Added {_n_added_snps} new snps in total')
 
-with Stopwatch('snp counting'):
-    # reorder so chromosomes with most reads are in the beginning
-    chromosomes = [contig for contig in samfile.get_index_statistics()[:25]]
-    chromosomes = list(sorted(chromosomes, key=lambda contig: -1e20 if 'MT' in contig.contig else -contig.mapped))
-    chromosomes = [contig.contig for contig in chromosomes]
-
-    with joblib.Parallel(n_jobs=10, verbose=11) as parallel:
-        _cbub2qual_and_snps = parallel(
-            joblib.delayed(count_call_variants_for_chromosome)(
-                samfile.filename.decode(), chromosome, genotypes_used.get_positions_for_chromosome(chromosome),
-                cellbarcode_compressor=lambda cb: barcode_handler.barcode2index.get(cb, None),
-            )
-            for chromosome in chromosomes
-        )
-    chromosome2cbub2qual_and_snps = dict(zip(chromosomes, _cbub2qual_and_snps))
+with Stopwatch('new_snp_counting'):
+    chromosome2cbub2qual_and_snps = count_snps(
+        bamfile_location=bamfile_location,
+        chromosome2positions={chr: genotypes_used.get_positions_for_chromosome(chr) for chr in chromosomes},
+        barcode_handler=barcode_handler,
+    )
 
 counter = {chromosome: len(cals) for chromosome, cals in chromosome2cbub2qual_and_snps.items()}
 
