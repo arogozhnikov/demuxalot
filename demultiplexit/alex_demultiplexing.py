@@ -1,8 +1,3 @@
-"""
-Tools to infer genotypes during demultiplexing.
-In can also run demultiplexing itself.
-
-"""
 from collections import defaultdict
 from typing import Tuple
 
@@ -11,35 +6,16 @@ import pandas as pd
 import pysam
 from scipy.special import softmax
 
-
-def hash_string(s):
-    """ used to compress UB (molecule barcodes) to group identical ones"""
-    result = 0
-    for c in s:
-        result *= 5
-        result += ord(c)
-    return result
-
-
-def fast_np_add_at_1d(x, indices, weights):
-    x[:] = x + np.bincount(indices, weights=weights, minlength=len(x))
-
-
-class BarcodeHandler:
-    def __init__(self, barcodes):
-        """Barcode handler is needed to compress barcodes to integers,
-        because strings take too much space  """
-        barcodes = list(barcodes)
-        assert len(set(barcodes)) == len(barcodes), "all passed barcodes should be unique"
-        self.barcode2index = {bc: i for i, bc in enumerate(barcodes)}
-        self.index2barcode = {i: bc for i, bc in enumerate(barcodes)}
+from demultiplexit.cellranger_specific import discard_read, compute_p_mistake
+from demultiplexit.utils import hash_string, fast_np_add_at_1d, BarcodeHandler
 
 
 class ChromosomeSNPLookup:
-    def __init__(self, positions):
+    def __init__(self, positions: np.ndarray):
         """
-        Allows checking intersection with SNPs, a bit memory-inefficient, but quite fast.
-        Positions are zero-based.
+        Allows fast checking of intersection with SNPs, a bit memory-inefficient, but quite fast.
+        Important note is that information from only one chromosome can be stored, so I care only about positions.
+        :param positions: zero-based (!) positions of SNPs on chromosomes
         """
         assert isinstance(positions, np.ndarray)
         assert np.array_equal(positions, np.sort(positions))
@@ -102,7 +78,7 @@ def compress_reads_group_to_snips(
         pos = (read.reference_start, read.reference_end, read.get_tag("AS"))
         if skip_complete_duplicates and (pos in processed_positions):
             # ignoring duplicates with same begin/end and number of mismatches
-            # relatively cheap way to exclude complete duplicates
+            # relatively cheap way to exclude complete duplicates, as those do not contribute
             continue
         processed_positions.add(pos)
         p_group_misaligned *= p_read_misaligned
@@ -143,30 +119,6 @@ def compress_old_groups(
 
     for cbub in to_remove:
         cbub2position_and_reads.pop(cbub)
-
-
-def discard_read(read) -> bool:
-    if read.get_tag("AS") <= len(read.seq) - 8:
-        # more than 2 edits
-        return True
-    if read.get_tag("NH") > 1:
-        # multi-mapped
-        return True
-    return False
-
-
-def compute_p_mistake(read):
-    if read.get_tag("AS") <= len(read.seq) - 8:
-        # more than 2 edits
-        return 1
-    if read.get_tag("NH") > 1:
-        # multi-mapped
-        return 1
-    if read.mapq < 20:
-        # this one should not be triggered because of NH, but just in case
-        return 1
-    # by default. TODO encounter amount of edits? How to avoid bias in this case?
-    return 0.01
 
 
 def count_call_variants(
