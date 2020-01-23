@@ -1,4 +1,5 @@
 from collections import defaultdict
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -7,12 +8,19 @@ from scipy.special import softmax
 from demultiplexit.utils import fast_np_add_at_1d, BarcodeHandler
 
 
-class GenotypesProbComputing:
+class ProbabilisticGenotype:
     type2code = {"0/0": 0, "0/1": 1, "1/1": 2, "./.": 3}
     code2type = {v: k for k, v in type2code.items()}
     code2prior = np.array([[99, 1], [50, 50], [1, 99], [1, 1]])
 
-    def __init__(self, snp_df, donor_names, verbose=False):
+    def __init__(self, snp_df, donor_names: List[str], verbose=False):
+        """
+        Genotype information with our certainty about each position.
+        :param snp_df: pd.DataFrame with information about possible donors.
+            Can contain donors which do not participate in
+        :param donor_names: list of donor names
+        """
+
         # TODO introduce data priors for all the SNPs
         # also code below assumes that someone dealt with too bad SNPs (that is true right now)
         # TODO keep only priors for both types of snps (initial and introduced)
@@ -54,6 +62,7 @@ class GenotypesProbComputing:
             snp2ref_alt[chromosome, position] = (ref, alt)
             priors = self.code2prior[genotype_codes]
             is_unknown = genotype_codes == self.type2code["./."]
+            assert np.sum(~is_unknown) > 0, 'SNP passed without any prior information'
             priors[is_unknown] = priors[~is_unknown].mean(axis=0, keepdims=True)
             genotype_snp_beta_prior[snp2sindex[chromosome, position]] = priors * (gsa_prior_weight / priors.mean())
 
@@ -84,7 +93,7 @@ class TrainableDemultiplexer:
         chromosome2cbub2qual_and_snps,
         barcode2possible_genotypes,
         barcode_handler: BarcodeHandler,
-        snp_prob_genotypes: GenotypesProbComputing,
+        snp_prob_genotypes: ProbabilisticGenotype,
         gsa_prior_weight=100,
         data_prior_strength=100,
     ):
