@@ -74,15 +74,15 @@ with Stopwatch('update genotypes with new SNPs'):
     prior_filename = here / 'new_snips.csv'
     pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
     print(f'Added {len(df["CHROM"]) // 2} new snps in total')
-    genotypes_used.add_prior_knowledge(prior_filename, prior_strength=10)
+    genotypes_used.add_prior_betas(prior_filename, prior_strength=10)
 
 with Stopwatch('check export'):
     posterior_filename = here / '_temp_exported_prior.tsv'
-    genotypes_used.export_posterior_knowledge(posterior_filename)
+    genotypes_used.save_betas(posterior_filename)
 
 with Stopwatch('check import'):
     genotypes_used2 = ProbabilisticGenotypes(used_donor_names)
-    genotypes_used2.add_prior_knowledge(posterior_filename, prior_strength=1.)
+    genotypes_used2.add_prior_betas(posterior_filename, prior_strength=1.)
 
 with Stopwatch('verifying agreement'):
     assert len(genotypes_used.snips) == len(genotypes_used2.snips)
@@ -189,7 +189,7 @@ assert np.allclose(debug_info['genotype_snp_posterior'], debug_info2['genotype_s
 
 with Stopwatch('importing difference'):
     genotypes_learnt = ProbabilisticGenotypes(used_donor_names)
-    genotypes_learnt.add_prior_knowledge(learnt_genotypes_filename, prior_strength=1.)
+    genotypes_learnt.add_prior_betas(learnt_genotypes_filename, prior_strength=1.)
     assert genotypes_learnt.generate_genotype_snp_beta_prior()[:2] == genotypes_used.generate_genotype_snp_beta_prior()[:2]
     _, _, _beta_prior = genotypes_learnt.generate_genotype_snp_beta_prior()
 

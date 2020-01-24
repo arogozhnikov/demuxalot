@@ -61,10 +61,7 @@ class ProbabilisticGenotypes:
             if verbose and len(self.snips) % 10000 == 0:
                 print("completed snps: ", len(self.snips))
 
-    def add_prior_knowledge(self, prior_filename, *, prior_strength):
-        """
-
-        """
+    def add_prior_betas(self, prior_filename, *, prior_strength):
         prior_knowledge = pd.read_csv(prior_filename, sep='\t')
         tech_columns = ['CHROM', 'POS', 'BASE', 'DEFAULT_PRIOR']
         for column in tech_columns:
@@ -119,16 +116,20 @@ class ProbabilisticGenotypes:
 
         return snp2sindex, snp2ref_alt, genotype_snp_beta_prior
 
-    def save_external_posteriors(self, path_or_buf, genotype_snp_beta_posteprior):
-        assert genotype_snp_beta_posteprior.shape[0] == len(self.snips)
-        assert genotype_snp_beta_posteprior.shape[1] == len(self.donor_names)
+    def save_betas(self, path_or_buf, *, external_betas: np.ndarray = None):
+        if external_betas is not None:
+            assert external_betas.shape[0] == len(self.snips)
+            assert external_betas.shape[1] == len(self.donor_names)
         snp2sindex = {}
         snp2ref_alt = {}
         result = []
         for sindex, ((chromosome, position), (ref, alt, priors)) in enumerate(sorted(self.snips.items())):
             snp2sindex[chromosome, position] = sindex
             snp2ref_alt[chromosome, position] = (ref, alt)
-            ref_betas, alt_betas = genotype_snp_beta_posteprior[sindex].T
+            if external_betas is None:
+                ref_betas, alt_betas = priors.T
+            else:
+                ref_betas, alt_betas = external_betas[sindex].T
             result.append({
                 'CHROM': chromosome,
                 'POS': position,
@@ -143,28 +144,6 @@ class ProbabilisticGenotypes:
                 'BASE': alt,
                 'DEFAULT_PRIOR': alt_betas.mean(),
                 **dict(zip(self.donor_names, alt_betas))
-            })
-        pd.DataFrame(result).to_csv(path_or_buf, sep='\t', index=False)
-
-    def export_posterior_knowledge(self, path_or_buf):
-        # TODO reduce to previous method
-        result = []
-        for (chromosome, position), (ref, alt, priors) in self.snips.items():
-            ref_priors, alt_priors = priors.T
-            result.append({
-                'CHROM': chromosome,
-                'POS': position,
-                'BASE': ref,
-                'DEFAULT_PRIOR': ref_priors.mean(),
-                **dict(zip(self.donor_names, ref_priors)),
-            })
-
-            result.append({
-                'CHROM': chromosome,
-                'POS': position,
-                'BASE': alt,
-                'DEFAULT_PRIOR': alt_priors.mean(),
-                **dict(zip(self.donor_names, alt_priors)),
             })
         pd.DataFrame(result).to_csv(path_or_buf, sep='\t', index=False)
 
@@ -285,9 +264,7 @@ class TrainableDemultiplexer:
             }
             if (save_learnt_genotypes_to is not None) and (iteration == n_iterations - 1):
                 assert isinstance(save_learnt_genotypes_to, str)
-                print('prior mean', genotype_snp_prior.mean(axis=(0, 2)))
-                print('posterior mean', genotype_snp_posterior.mean(axis=(0, 2)))
-                self.probabilistic_genotypes.save_external_posteriors(save_learnt_genotypes_to, genotype_snp_posterior)
+                self.probabilistic_genotypes.save_betas(save_learnt_genotypes_to, external_betas=genotype_snp_posterior)
             yield barcode_posterior_probs_df, debug_information
 
             genotype_snp_posterior = genotype_snp_prior.copy()
