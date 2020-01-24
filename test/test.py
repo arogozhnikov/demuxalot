@@ -1,5 +1,6 @@
 import json
 import pprint
+from collections import defaultdict
 from pathlib import Path
 
 import joblib
@@ -10,7 +11,7 @@ import pysam
 from orgalorg.omics.utils import read_vcf_to_header_and_pandas
 from pipeline.Stopwatch import Stopwatch
 
-from demultiplexit.demutiplexit import ProbabilisticGenotype, TrainableDemultiplexer
+from demultiplexit.demutiplexit import ProbabilisticGenotypes, TrainableDemultiplexer
 from demultiplexit.snp_counter import count_snps
 from demultiplexit.utils import BarcodeHandler
 
@@ -32,6 +33,7 @@ with Stopwatch('barcodes'):
 def filter_snps(snps, donor_names):
     strings = snps[donor_names].sum(axis=1)
     mask = strings.map(lambda x: '0' in x and '1' in x)
+    # no more than one undetermined SNP
     mask &= (snps[donor_names] == './.').sum(axis=1) <= 1
     return snps[mask]
 
@@ -43,25 +45,36 @@ with Stopwatch('read GSA vcf'):
 
 with Stopwatch('construct genotypes from GSA'):
     used_donor_names = list(np.unique(sum(lane2inferred_donor.values(), [])).tolist())
-    genotypes_used = ProbabilisticGenotype(all_snps, used_donor_names)
+    genotypes_used = ProbabilisticGenotypes(used_donor_names)
+    genotypes_used.add_vcf(all_snps, prior_strength=100)
 
 with Stopwatch('update genotypes with new SNPs'):
     # extend genotypes with added SNPs
+    # saving learnt genotypes to a separate file
     chrom2snp_positions_and_stats = joblib.load(here / 'chrom2possible0basedpositions_based_on_donors.joblib.pkl')
-    _n_added_snps = 0
+    df = defaultdict(list)
     for chromosome, (snp_positions, snp_stats) in chrom2snp_positions_and_stats.items():
         for snp_position, snp_stat in zip(snp_positions, snp_stats):
-            _, _, alt, ref = np.argsort(snp_stat)
-            alt_count, ref_count = snp_stat[alt], snp_stat[ref]
             if (chromosome, snp_position) in genotypes_used.snips:
                 continue
-            else:
-                priors = np.asarray([ref_count, alt_count]) * 1.
-                genotypes_used.introduced_snps_chrompos2ref_alt_priors[chromosome, snp_position] = (
-                    'ACGT'[ref], 'ACGT'[alt], priors)
 
-                _n_added_snps += 1
-    print(f'Added {_n_added_snps} new snps in total')
+            _, _, alt, ref = np.argsort(snp_stat)
+            alt_count, ref_count = snp_stat[alt], snp_stat[ref]
+            alt_count, ref_count = np.asarray([alt_count, ref_count]) / (alt_count + ref_count)
+            df['CHROM'].append(chromosome)
+            df['POS'].append(snp_position)
+            df['BASE'].append('ACGT'[ref])
+            df['DEFAULT_PRIOR'].append(ref_count)
+
+            df['CHROM'].append(chromosome)
+            df['POS'].append(snp_position)
+            df['BASE'].append('ACGT'[alt])
+            df['DEFAULT_PRIOR'].append(alt_count)
+
+    prior_filename = here / 'new_snips.csv'
+    pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
+    print(f'Added {len(df["CHROM"]) // 2} new snps in total')
+    genotypes_used.add_prior_knowledge(prior_filename)
 
 with Stopwatch('new_snp_counting'):
     # reorder so chromosomes with most reads are in the beginning
@@ -115,10 +128,8 @@ with Stopwatch(f'initialization'):
     trainable_demultiplexer = TrainableDemultiplexer(
         chromosome2cbub2qual_and_snps,
         barcode2possible_genotypes={barcode: used_donor_names for barcode in barcode_handler.barcode2index},
-        snp_prob_genotypes=genotypes_used,
+        probabilistic_genotypes=genotypes_used,
         barcode_handler=barcode_handler,
-        gsa_prior_weight=100,
-        data_prior_strength=10,
     )
 
 with Stopwatch('demultiplexing'):
@@ -132,11 +143,10 @@ with Stopwatch('demultiplexing'):
 
         assert np.allclose(logits, logits2)
 
-print(np.max(logits, axis=0))
+print(list(np.max(logits, axis=0)))
 
-reference = [-14.676262, -12.325366, -21.81131, -13.042043, -12.271675, -12.613088,
-             -4.538845, -13.126031, -7.1431227, -12.59893, -11.432744, -12.904545,
-             -9.68996, -14.016859, -6.106669, -4.4770527, -6.6246023, -10.56565,
-             -4.9614797, -15.208621, -7.087641,]
+reference = [-14.673564, -12.325023, -21.798777, -13.038282, -12.271305, -12.648042, -4.566181, -12.732492, -7.146144,
+             -12.174306, -11.428376, -12.903507, -9.499123, -14.021539, -6.112081, -4.4732895, -6.620908, -10.586274,
+             -4.9894757, -14.94, -7.0786963]
 
 assert np.allclose(np.max(logits, axis=0), reference)
