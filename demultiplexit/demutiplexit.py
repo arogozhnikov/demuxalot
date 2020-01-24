@@ -17,6 +17,7 @@ class ProbabilisticGenotypes:
         Class doesn't handle more than one SNP at position (examples are A/T and A/C at the same position),
         so we keep the first SNP for position.
         Genotype information is always accumulated, not overwritten.
+        Information is stored as betas.
         """
         self.snips = {}
         self.donor_names = list(donor_names)
@@ -24,10 +25,12 @@ class ProbabilisticGenotypes:
 
     def add_vcf(self, snp_df, prior_strength=100, verbose=False):
         """
-        Genotype information with our certainty about each position.
+        Add information from parsed VCF
         :param snp_df: pd.DataFrame with information about possible donors.
+            Columns are donors, rows are
             Can contain more donors
         """
+        # TODO parse VCF right here
         type2code = {"0/0": 0, "0/1": 1, "1/1": 2, "./.": 3}
         code2prior = np.array([[0.99, 0.01], [0.50, 0.50], [0.01, 0.99], [0, 0]], dtype='float32') * prior_strength
 
@@ -58,7 +61,7 @@ class ProbabilisticGenotypes:
             if verbose and len(self.snips) % 10000 == 0:
                 print("completed snps: ", len(self.snips))
 
-    def add_prior_knowledge(self, prior_filename, prior_strength=10):
+    def add_prior_knowledge(self, prior_filename, *, prior_strength):
         """
 
         """
@@ -77,10 +80,11 @@ class ProbabilisticGenotypes:
 
         for (chromosome, position), snp_priors in prior_knowledge.groupby(['CHROM', 'POS']):
             if len(snp_priors) != 2:
-                print('two alternatives for the same position in genome are handled only')
+                print('Can handle only two alternatives for the same position in genome', chromosome, position)
                 continue
 
             bases = list(snp_priors['BASE'])
+            assert bases[0] != bases[1]
             snp_priors = snp_priors[self.donor_names].values.T
 
             if (chromosome, position) in self.snips:
@@ -101,20 +105,68 @@ class ProbabilisticGenotypes:
         return np.unique(np.asarray(positions, dtype=int))
 
     def generate_genotype_snp_beta_prior(self):
-        snp2sindex = {
-            (chromosome, position): sindex
-            for sindex, (chromosome, position) in enumerate(self.snips)
-        }
-        snp2ref_alt = {}
         n_genotypes = len(self.donor_names)
-        n_snps = len(snp2sindex)
+        n_snps = len(self.snips)
+
+        snp2sindex = {}
+        snp2ref_alt = {}
         genotype_snp_beta_prior = np.zeros([n_snps, n_genotypes, 2], dtype="float32")
 
-        for (chromosome, position), (ref, alt, priors) in self.snips.items():
+        for sindex, ((chromosome, position), (ref, alt, priors)) in enumerate(sorted(self.snips.items())):
+            snp2sindex[chromosome, position] = sindex
             snp2ref_alt[chromosome, position] = (ref, alt)
-            genotype_snp_beta_prior[snp2sindex[chromosome, position]] = priors
+            genotype_snp_beta_prior[sindex] = priors
 
         return snp2sindex, snp2ref_alt, genotype_snp_beta_prior
+
+    def save_external_posteriors(self, path_or_buf, genotype_snp_beta_posteprior):
+        assert genotype_snp_beta_posteprior.shape[0] == len(self.snips)
+        assert genotype_snp_beta_posteprior.shape[1] == len(self.donor_names)
+        snp2sindex = {}
+        snp2ref_alt = {}
+        result = []
+        for sindex, ((chromosome, position), (ref, alt, priors)) in enumerate(sorted(self.snips.items())):
+            snp2sindex[chromosome, position] = sindex
+            snp2ref_alt[chromosome, position] = (ref, alt)
+            ref_betas, alt_betas = genotype_snp_beta_posteprior[sindex].T
+            result.append({
+                'CHROM': chromosome,
+                'POS': position,
+                'BASE': ref,
+                'DEFAULT_PRIOR': ref_betas.mean(),
+                **dict(zip(self.donor_names, ref_betas))
+            })
+
+            result.append({
+                'CHROM': chromosome,
+                'POS': position,
+                'BASE': alt,
+                'DEFAULT_PRIOR': alt_betas.mean(),
+                **dict(zip(self.donor_names, alt_betas))
+            })
+        pd.DataFrame(result).to_csv(path_or_buf, sep='\t', index=False)
+
+    def export_posterior_knowledge(self, path_or_buf):
+        # TODO reduce to previous method
+        result = []
+        for (chromosome, position), (ref, alt, priors) in self.snips.items():
+            ref_priors, alt_priors = priors.T
+            result.append({
+                'CHROM': chromosome,
+                'POS': position,
+                'BASE': ref,
+                'DEFAULT_PRIOR': ref_priors.mean(),
+                **dict(zip(self.donor_names, ref_priors)),
+            })
+
+            result.append({
+                'CHROM': chromosome,
+                'POS': position,
+                'BASE': alt,
+                'DEFAULT_PRIOR': alt_priors.mean(),
+                **dict(zip(self.donor_names, alt_priors)),
+            })
+        pd.DataFrame(result).to_csv(path_or_buf, sep='\t', index=False)
 
 
 class TrainableDemultiplexer:
@@ -150,6 +202,7 @@ class TrainableDemultiplexer:
         self.mindex2bindex, self.snps = self.preprocess_snp_calls(barcode_handler, chromosome2cbub2qual_and_snps)
 
         self.barcode_genotype_prior_logits = self.compute_genotype2barcode_logit_prior(barcode2possible_genotypes)
+        self.probabilistic_genotypes = probabilistic_genotypes
 
     def preprocess_snp_calls(self, barcode_handler, chromosome2cbub2qual_and_snps):
         preprocessed_snps = []  # (mindex, sindex, is_alt, p_base_wrong)
@@ -203,13 +256,14 @@ class TrainableDemultiplexer:
                 barcode_genotype_prior_logits[self.barcode2bindex[barcode], self.genotype2gindex[genotype]] = 0
         return barcode_genotype_prior_logits
 
-    def run_fast_em_iterations(self, n_iterations=10, power=2, p_genotype_clip=0.01, genotype_snp_prior=None):
+    def staged_genotype_learning(self, n_iterations=10, power=2, p_genotype_clip=0.01,
+                                 genotype_snp_prior=None, save_learnt_genotypes_to=None):
         snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = self.compress_snp_calls(self.mindex2bindex, self.snps)
         if genotype_snp_prior is None:
             genotype_snp_prior = self.genotype_snp_beta_prior
         genotype_snp_posterior = genotype_snp_prior.copy()
 
-        for _iteration in range(n_iterations):
+        for iteration in range(n_iterations):
             genotype_prob = genotype_snp_posterior / genotype_snp_posterior.sum(axis=-1, keepdims=True)
             genotype_prob = genotype_prob.clip(p_genotype_clip, 1 - p_genotype_clip)
 
@@ -224,7 +278,17 @@ class TrainableDemultiplexer:
                 data=barcode_posterior_probs, index=list(self.barcode2bindex), columns=list(self.genotype2gindex)
             )
             # yielding here to provide aligned posteriors for genotypes and barcodes
-            yield barcode_posterior_probs_df, barcode_posterior_logits, genotype_snp_posterior
+            debug_information = {
+                'barcode_logits': barcode_posterior_logits,
+                'snp_prior': genotype_snp_prior,
+                'genotype_snp_posterior': genotype_snp_posterior
+            }
+            if (save_learnt_genotypes_to is not None) and (iteration == n_iterations - 1):
+                assert isinstance(save_learnt_genotypes_to, str)
+                print('prior mean', genotype_snp_prior.mean(axis=(0, 2)))
+                print('posterior mean', genotype_snp_posterior.mean(axis=(0, 2)))
+                self.probabilistic_genotypes.save_external_posteriors(save_learnt_genotypes_to, genotype_snp_posterior)
+            yield barcode_posterior_probs_df, debug_information
 
             genotype_snp_posterior = genotype_snp_prior.copy()
             for gindex in self.genotype2gindex.values():
@@ -306,9 +370,8 @@ class TrainableDemultiplexer:
             genotype_snp_posterior = self.genotype_snp_beta_prior.copy()
             for _i in np.arange(0, len(snp_bindices), 10000):
                 sel = np.index_exp[_i: _i + 10000]
-                p = genotype_snp_posterior[snp_bindices[sel], :, snp_is_alt[sel]] / genotype_snp_posterior[
-                                                                                    snp_bindices[sel], :, :
-                                                                                    ].sum(axis=-1)
+                p = genotype_snp_posterior[snp_bindices[sel], :, snp_is_alt[sel]]
+                p = p / genotype_snp_posterior[snp_bindices[sel], :, :].sum(axis=-1)
                 p = p.clip(0.01, 0.99)  # snp x genotype
                 log_penalties = np.log(p * (1 - snp_p_wrong[sel][:, None]) + snp_p_wrong[sel][:, None].clip(1e-4))
                 contribution = barcode_posterior_logits[snp_bindices[sel]] - log_penalties

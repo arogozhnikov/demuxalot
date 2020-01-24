@@ -39,7 +39,7 @@ def filter_snps(snps, donor_names):
 
 
 with Stopwatch('read GSA vcf'):
-    _, all_snps = read_vcf_to_header_and_pandas(here / 'system1_merged_v4.vcf')
+    _, all_snps = read_vcf_to_header_and_pandas(here / 'system1_merged_v4_mini.vcf')
     all_donor_names = list(all_snps.columns[9:])
     all_snps = filter_snps(all_snps, donor_names=all_donor_names)
 
@@ -74,7 +74,29 @@ with Stopwatch('update genotypes with new SNPs'):
     prior_filename = here / 'new_snips.csv'
     pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
     print(f'Added {len(df["CHROM"]) // 2} new snps in total')
-    genotypes_used.add_prior_knowledge(prior_filename)
+    genotypes_used.add_prior_knowledge(prior_filename, prior_strength=10)
+
+with Stopwatch('check export'):
+    posterior_filename = here / '_temp_exported_prior.tsv'
+    genotypes_used.export_posterior_knowledge(posterior_filename)
+
+with Stopwatch('check import'):
+    genotypes_used2 = ProbabilisticGenotypes(used_donor_names)
+    genotypes_used2.add_prior_knowledge(posterior_filename, prior_strength=1.)
+
+with Stopwatch('verifying agreement'):
+    assert len(genotypes_used.snips) == len(genotypes_used2.snips)
+    assert genotypes_used.donor_names == genotypes_used2.donor_names
+    for (chrom, pos), (ref, alt, priors) in genotypes_used.snips.items():
+        ref2, alt2, priors2 = genotypes_used2.snips[chrom, pos]
+        assert alt == alt2
+        assert ref == ref2
+        assert np.allclose(priors, priors2)
+
+    snp2sindex1, _, _beta_priors1 = genotypes_used.generate_genotype_snp_beta_prior()
+    snp2sindex2, _, _beta_priors2 = genotypes_used2.generate_genotype_snp_beta_prior()
+    assert snp2sindex1 == snp2sindex2
+    assert np.allclose(_beta_priors1, _beta_priors2)
 
 with Stopwatch('new_snp_counting'):
     # reorder so chromosomes with most reads are in the beginning
@@ -88,43 +110,42 @@ with Stopwatch('new_snp_counting'):
         barcode_handler=barcode_handler,
     )
 
-counter = {
-    chromosome: len(cals) for chromosome, cals in chromosome2cbub2qual_and_snps.items()
-}
-pprint.pprint(counter)
+    counter = {
+        chromosome: len(cals) for chromosome, cals in chromosome2cbub2qual_and_snps.items()
+    }
+    pprint.pprint(counter)
 
 assert counter == {
-    'GRCh38_______1': 5074,
-    'GRCh38_______10': 1091,
-    'GRCh38_______11': 8393,
-    'GRCh38_______12': 1760,
-    'GRCh38_______13': 618,
-    'GRCh38_______14': 1094,
-    'GRCh38_______15': 1509,
-    'GRCh38_______16': 2247,
-    'GRCh38_______17': 3280,
-    'GRCh38_______18': 243,
-    'GRCh38_______19': 5940,
-    'GRCh38_______2': 3163,
-    'GRCh38_______20': 1564,
-    'GRCh38_______21': 326,
-    'GRCh38_______22': 1927,
-    'GRCh38_______3': 3488,
-    'GRCh38_______4': 1303,
-    'GRCh38_______5': 1601,
-    'GRCh38_______6': 2817,
-    'GRCh38_______7': 2701,
-    'GRCh38_______8': 2582,
-    'GRCh38_______9': 1251,
-    'GRCh38_______MT': 26507,
-    'GRCh38_______X': 657,
-    'GRCh38_______Y': 0
-}
+    'GRCh38_______1': 3920,
+    'GRCh38_______10': 765,
+    'GRCh38_______11': 7687,
+    'GRCh38_______12': 1393,
+    'GRCh38_______13': 376,
+    'GRCh38_______14': 851,
+    'GRCh38_______15': 1261,
+    'GRCh38_______16': 1884,
+    'GRCh38_______17': 2838,
+    'GRCh38_______18': 124,
+    'GRCh38_______19': 5429,
+    'GRCh38_______2': 2167,
+    'GRCh38_______20': 1378,
+    'GRCh38_______21': 95,
+    'GRCh38_______22': 1765,
+    'GRCh38_______3': 2926,
+    'GRCh38_______4': 1011,
+    'GRCh38_______5': 740,
+    'GRCh38_______6': 2122,
+    'GRCh38_______7': 2306,
+    'GRCh38_______8': 2202,
+    'GRCh38_______9': 854,
+    'GRCh38_______MT': 24862,
+    'GRCh38_______X': 384,
+    'GRCh38_______Y': 0}
 
 for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
     print(chromosome, len(cbub2qual_and_snps))
 
-with Stopwatch(f'initialization'):
+with Stopwatch(f'demux initialization'):
     trainable_demultiplexer = TrainableDemultiplexer(
         chromosome2cbub2qual_and_snps,
         barcode2possible_genotypes={barcode: used_donor_names for barcode in barcode_handler.barcode2index},
@@ -133,20 +154,52 @@ with Stopwatch(f'initialization'):
     )
 
 with Stopwatch('demultiplexing'):
-    for barcode_posterior_probs_df, logits, genotype_snp_posterior in trainable_demultiplexer.run_fast_em_iterations(
-            n_iterations=3):
+    for barcode_posterior_probs_df, debug_info in trainable_demultiplexer.staged_genotype_learning(n_iterations=3):
         print('one more iteration complete')
         logits2 = trainable_demultiplexer.predict_posteriors(
-            genotype_snp_posterior,
+            debug_info['genotype_snp_posterior'],
             chromosome2cbub2qual_and_snps,
             barcode_handler, only_singlets=True)
-
+        logits = debug_info['barcode_logits']
         assert np.allclose(logits, logits2)
 
 print(list(np.max(logits, axis=0)))
 
-reference = [-14.673564, -12.325023, -21.798777, -13.038282, -12.271305, -12.648042, -4.566181, -12.732492, -7.146144,
-             -12.174306, -11.428376, -12.903507, -9.499123, -14.021539, -6.112081, -4.4732895, -6.620908, -10.586274,
-             -4.9894757, -14.94, -7.0786963]
+reference = [-4.1255603, -4.2695103, -9.513682, -3.824123, -4.157081, -4.3482676, -3.9152608, -8.900769, -4.4701805,
+             -3.8421426, -4.585875, -4.1683974, -3.307035, -4.4903097, -4.402192, -3.8523905, -3.9055922, -3.9764569,
+             -3.7411292, -3.964514, -3.770989]
 
 assert np.allclose(np.max(logits, axis=0), reference)
+
+with Stopwatch('demux initialization again'):
+    trainable_demultiplexer2 = TrainableDemultiplexer(
+        chromosome2cbub2qual_and_snps,
+        barcode2possible_genotypes={barcode: used_donor_names for barcode in barcode_handler.barcode2index},
+        barcode_handler=barcode_handler,
+        probabilistic_genotypes=genotypes_used2,
+    )
+
+with Stopwatch('demultiplexing again and exporting difference'):
+    learnt_genotypes_filename = here / '_learnt_beta_contributions.csv'
+    for _, debug_info2 in trainable_demultiplexer2.staged_genotype_learning(
+            n_iterations=3, save_learnt_genotypes_to=str(learnt_genotypes_filename)):
+        print('one more iteration complete')
+
+assert np.allclose(debug_info['genotype_snp_posterior'], debug_info2['genotype_snp_posterior'])
+
+with Stopwatch('importing difference'):
+    genotypes_learnt = ProbabilisticGenotypes(used_donor_names)
+    genotypes_learnt.add_prior_knowledge(learnt_genotypes_filename, prior_strength=1.)
+    assert genotypes_learnt.generate_genotype_snp_beta_prior()[:2] == genotypes_used.generate_genotype_snp_beta_prior()[:2]
+    _, _, _beta_prior = genotypes_learnt.generate_genotype_snp_beta_prior()
+
+    assert np.allclose(_beta_prior, debug_info['genotype_snp_posterior'])
+
+    logits3 = trainable_demultiplexer2.predict_posteriors(
+        _beta_prior,
+        chromosome2cbub2qual_and_snps,
+        barcode_handler=barcode_handler, only_singlets=True)
+
+    assert np.allclose(logits2, logits3)
+
+print('Yup, all is fine')
