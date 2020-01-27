@@ -8,6 +8,8 @@ from scipy.special import softmax
 from demultiplexit.utils import fast_np_add_at_1d, BarcodeHandler
 
 
+# TODO rename donor_names to genotypes
+
 class ProbabilisticGenotypes:
     def __init__(self, donor_names: List[str]):
         """
@@ -21,7 +23,7 @@ class ProbabilisticGenotypes:
         """
         self.snips = {}
         self.donor_names = list(donor_names)
-        assert (np.sort(self.donor_names) == self.donor_names).all(), 'order donors'
+        assert (np.sort(self.donor_names) == self.donor_names).all(), 'please order donors'
 
     def add_vcf(self, snp_df, prior_strength=100, verbose=False):
         """
@@ -169,10 +171,8 @@ class TrainableDemultiplexer:
             probabilistic_genotypes: ProbabilisticGenotypes,
     ):
         self.barcode2bindex = {barcode: position for position, barcode in enumerate(barcode2possible_genotypes.keys())}
-        genotypes = set()
-        for g in barcode2possible_genotypes.values():
-            genotypes.update(g)
-        genotypes = np.unique(list(genotypes))
+        genotypes = list(probabilistic_genotypes.donor_names)
+        assert list(sorted(genotypes)) == genotypes, 'genotypes names are not sorted'
         self.genotype2gindex = {barcode: position for position, barcode in enumerate(genotypes)}
 
         self.snp2sindex, self.snp2ref_alt, self.genotype_snp_beta_prior \
@@ -235,7 +235,7 @@ class TrainableDemultiplexer:
                 barcode_genotype_prior_logits[self.barcode2bindex[barcode], self.genotype2gindex[genotype]] = 0
         return barcode_genotype_prior_logits
 
-    def staged_genotype_learning(self, n_iterations=10, power=2, p_genotype_clip=0.01,
+    def staged_genotype_learning(self, n_iterations=5, power=2, p_genotype_clip=0.01,
                                  genotype_snp_prior=None, save_learnt_genotypes_to=None):
         snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = self.compress_snp_calls(self.mindex2bindex, self.snps)
         if genotype_snp_prior is None:
