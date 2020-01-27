@@ -8,35 +8,38 @@ from scipy.special import softmax
 from demultiplexit.utils import fast_np_add_at_1d, BarcodeHandler
 
 
-# TODO rename donor_names to genotypes
-
 class ProbabilisticGenotypes:
-    def __init__(self, donor_names: List[str]):
+    def __init__(self, genotype_names: List[str]):
         """
         ProbabilisticGenotype represents our accumulated knowledge about SNPs (and SNPs only) for genotypes.
         Can aggregate information from GSA, our prior guesses and genotype information learnt from RNAseq.
-        Donor names can't be changed once object is created.
+        Genotype names can't be changed once object is created.
         Class doesn't handle more than one SNP at position (examples are A/T and A/C at the same position),
         so we keep the first SNP for position.
         Genotype information is always accumulated, not overwritten.
         Information is stored as betas.
         """
         self.snips = {}
-        self.donor_names = list(donor_names)
-        assert (np.sort(self.donor_names) == self.donor_names).all(), 'please order donors'
+        self.genotype_names = list(genotype_names)
+        assert (np.sort(self.genotype_names) == self.genotype_names).all(), 'please order genotype names'
+
+    def __repr__(self):
+        return f'<Genotypes with {len(self.genotype_names)} genotypes: {self.genotype_names} ' \
+               f'and {len(self.snips)} SNVs >'
 
     def add_vcf(self, snp_df, prior_strength=100, verbose=False):
         """
         Add information from parsed VCF
-        :param snp_df: pd.DataFrame with information about possible donors.
-            Columns are donors, rows are
-            Can contain more donors
+        :param snp_df: pd.DataFrame with information about genotypes.
+            Columns are genotypes + ["CHROM", "POS", "REF", "ALT"], rows are SNPs. Values are (0/0, 0/1, 1/1, ./.)
+            Should contain all genotypes of interest. Can contain additional genotypes, but those will be ignored.
         """
         # TODO parse VCF right here
         type2code = {"0/0": 0, "0/1": 1, "1/1": 2, "./.": 3}
         code2prior = np.array([[0.99, 0.01], [0.50, 0.50], [0.01, 0.99], [0, 0]], dtype='float32') * prior_strength
 
-        snp_df = snp_df.set_index(["CHROM", "POS", "REF", "ALT"])[self.donor_names].replace(type2code).astype("uint8")
+        snp_df = snp_df.set_index(["CHROM", "POS", "REF", "ALT"])[self.genotype_names].replace(type2code).astype(
+            "uint8")
 
         for (chromosome, position, ref, alt), genotype_codes in snp_df.iterrows():
             genotype_codes = genotype_codes.values
@@ -68,14 +71,14 @@ class ProbabilisticGenotypes:
         tech_columns = ['CHROM', 'POS', 'BASE', 'DEFAULT_PRIOR']
         for column in tech_columns:
             assert column in prior_knowledge.columns
-        donor_names_in_prior = [column for column in prior_knowledge.columns if column not in tech_columns]
-        print('Provided prior information about donors:', donor_names_in_prior)
-        for donor in self.donor_names:
-            if donor not in donor_names_in_prior:
-                print(f'no information for donor {donor}, filling with default')
-                prior_knowledge[donor] = prior_knowledge['DEFAULT_PRIOR']
+        gt_names_in_prior = [column for column in prior_knowledge.columns if column not in tech_columns]
+        print('Provided prior information about genotypes:', gt_names_in_prior)
+        for genotype in self.genotype_names:
+            if genotype not in gt_names_in_prior:
+                print(f'no information for genotype {genotype}, filling with default')
+                prior_knowledge[genotype] = prior_knowledge['DEFAULT_PRIOR']
 
-        prior_knowledge[self.donor_names] *= prior_strength
+        prior_knowledge[self.genotype_names] *= prior_strength
 
         for (chromosome, position), snp_priors in prior_knowledge.groupby(['CHROM', 'POS']):
             if len(snp_priors) != 2:
@@ -84,7 +87,7 @@ class ProbabilisticGenotypes:
 
             bases = list(snp_priors['BASE'])
             assert bases[0] != bases[1]
-            snp_priors = snp_priors[self.donor_names].values.T
+            snp_priors = snp_priors[self.genotype_names].values.T
 
             if (chromosome, position) in self.snips:
                 *ref_alt, existing_prior = self.snips[chromosome, position]
@@ -104,7 +107,7 @@ class ProbabilisticGenotypes:
         return np.unique(np.asarray(positions, dtype=int))
 
     def generate_genotype_snp_beta_prior(self):
-        n_genotypes = len(self.donor_names)
+        n_genotypes = len(self.genotype_names)
         n_snps = len(self.snips)
 
         snp2sindex = {}
@@ -121,7 +124,7 @@ class ProbabilisticGenotypes:
     def save_betas(self, path_or_buf, *, external_betas: np.ndarray = None):
         if external_betas is not None:
             assert external_betas.shape[0] == len(self.snips)
-            assert external_betas.shape[1] == len(self.donor_names)
+            assert external_betas.shape[1] == len(self.genotype_names)
         snp2sindex = {}
         snp2ref_alt = {}
         result = []
@@ -137,7 +140,7 @@ class ProbabilisticGenotypes:
                 'POS': position,
                 'BASE': ref,
                 'DEFAULT_PRIOR': ref_betas.mean(),
-                **dict(zip(self.donor_names, ref_betas))
+                **dict(zip(self.genotype_names, ref_betas))
             })
 
             result.append({
@@ -145,7 +148,7 @@ class ProbabilisticGenotypes:
                 'POS': position,
                 'BASE': alt,
                 'DEFAULT_PRIOR': alt_betas.mean(),
-                **dict(zip(self.donor_names, alt_betas))
+                **dict(zip(self.genotype_names, alt_betas))
             })
         pd.DataFrame(result).to_csv(path_or_buf, sep='\t', index=False)
 
@@ -171,7 +174,7 @@ class TrainableDemultiplexer:
             probabilistic_genotypes: ProbabilisticGenotypes,
     ):
         self.barcode2bindex = {barcode: position for position, barcode in enumerate(barcode2possible_genotypes.keys())}
-        genotypes = list(probabilistic_genotypes.donor_names)
+        genotypes = list(probabilistic_genotypes.genotype_names)
         assert list(sorted(genotypes)) == genotypes, 'genotypes names are not sorted'
         self.genotype2gindex = {barcode: position for position, barcode in enumerate(genotypes)}
 

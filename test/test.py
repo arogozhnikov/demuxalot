@@ -18,7 +18,7 @@ from demultiplexit.utils import BarcodeHandler
 here = Path(__file__).parent
 
 with open(here / 'lane2guessed_donor.json') as f:
-    lane2inferred_donor = json.load(f)
+    lane2inferred_genotypes = json.load(f)
 
 bamfile_location = str(here / 'composed_1_perlane_sorted.bam')
 bamfile = pysam.AlignmentFile(bamfile_location)
@@ -26,26 +26,27 @@ barcodes_all_lanes = pd.read_csv(here / 'composed_barcodes_1.tsv', header=None)[
 
 with Stopwatch('barcodes'):
     barcode_handler = BarcodeHandler(barcodes_all_lanes)
-    barcode2possible_donors = {barcode: lane2inferred_donor[barcode.split('_')[1]] for barcode in barcodes_all_lanes
-                               if barcode.split('_')[1] in lane2inferred_donor}
+    barcode2possible_genotypes = {barcode: lane2inferred_genotypes[barcode.split('_')[1]]
+                                  for barcode in barcodes_all_lanes
+                                  if barcode.split('_')[1] in lane2inferred_genotypes}
 
 
-def filter_snps(snps, donor_names):
-    strings = snps[donor_names].sum(axis=1)
+def filter_snps(snps, genotype_names):
+    strings = snps[genotype_names].sum(axis=1)
     mask = strings.map(lambda x: '0' in x and '1' in x)
     # no more than one undetermined SNP
-    mask &= (snps[donor_names] == './.').sum(axis=1) <= 1
+    mask &= (snps[genotype_names] == './.').sum(axis=1) <= 1
     return snps[mask]
 
 
 with Stopwatch('read GSA vcf'):
     _, all_snps = read_vcf_to_header_and_pandas(here / 'system1_merged_v4_mini.vcf')
-    all_donor_names = list(all_snps.columns[9:])
-    all_snps = filter_snps(all_snps, donor_names=all_donor_names)
+    all_genotypes_names = list(all_snps.columns[9:])
+    all_snps = filter_snps(all_snps, genotype_names=all_genotypes_names)
 
 with Stopwatch('construct genotypes from GSA'):
-    used_donor_names = list(np.unique(sum(lane2inferred_donor.values(), [])).tolist())
-    genotypes_used = ProbabilisticGenotypes(used_donor_names)
+    used_genotypes_names = list(np.unique(sum(lane2inferred_genotypes.values(), [])).tolist())
+    genotypes_used = ProbabilisticGenotypes(used_genotypes_names)
     genotypes_used.add_vcf(all_snps, prior_strength=100)
 
 with Stopwatch('update genotypes with new SNPs'):
@@ -81,12 +82,12 @@ with Stopwatch('check export'):
     genotypes_used.save_betas(posterior_filename)
 
 with Stopwatch('check import'):
-    genotypes_used2 = ProbabilisticGenotypes(used_donor_names)
+    genotypes_used2 = ProbabilisticGenotypes(used_genotypes_names)
     genotypes_used2.add_prior_betas(posterior_filename, prior_strength=1.)
 
 with Stopwatch('verifying agreement'):
     assert len(genotypes_used.snips) == len(genotypes_used2.snips)
-    assert genotypes_used.donor_names == genotypes_used2.donor_names
+    assert genotypes_used.genotype_names == genotypes_used2.genotype_names
     for (chrom, pos), (ref, alt, priors) in genotypes_used.snips.items():
         ref2, alt2, priors2 = genotypes_used2.snips[chrom, pos]
         assert alt == alt2
@@ -148,7 +149,7 @@ for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
 with Stopwatch(f'demux initialization'):
     trainable_demultiplexer = TrainableDemultiplexer(
         chromosome2cbub2qual_and_snps,
-        barcode2possible_genotypes={barcode: used_donor_names for barcode in barcode_handler.barcode2index},
+        barcode2possible_genotypes={barcode: used_genotypes_names for barcode in barcode_handler.barcode2index},
         probabilistic_genotypes=genotypes_used,
         barcode_handler=barcode_handler,
     )
@@ -174,7 +175,7 @@ assert np.allclose(np.max(logits, axis=0), reference)
 with Stopwatch('demux initialization again'):
     trainable_demultiplexer2 = TrainableDemultiplexer(
         chromosome2cbub2qual_and_snps,
-        barcode2possible_genotypes={barcode: used_donor_names for barcode in barcode_handler.barcode2index},
+        barcode2possible_genotypes={barcode: used_genotypes_names for barcode in barcode_handler.barcode2index},
         barcode_handler=barcode_handler,
         probabilistic_genotypes=genotypes_used2,
     )
@@ -188,7 +189,7 @@ with Stopwatch('demultiplexing again and exporting difference'):
 assert np.allclose(debug_info['genotype_snp_posterior'], debug_info2['genotype_snp_posterior'])
 
 with Stopwatch('importing difference'):
-    genotypes_learnt = ProbabilisticGenotypes(used_donor_names)
+    genotypes_learnt = ProbabilisticGenotypes(used_genotypes_names)
     genotypes_learnt.add_prior_betas(learnt_genotypes_filename, prior_strength=1.)
     assert genotypes_learnt.generate_genotype_snp_beta_prior()[:2] == genotypes_used.generate_genotype_snp_beta_prior()[:2]
     _, _, _beta_prior = genotypes_learnt.generate_genotype_snp_beta_prior()
