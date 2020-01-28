@@ -4,8 +4,8 @@ import joblib
 import numpy as np
 import pysam
 
-from demultiplexit.cellranger_specific import compute_p_mistake, discard_read
-from demultiplexit.utils import hash_string, BarcodeHandler
+from scrnaseq_demux.cellranger_specific import compute_p_mistake, discard_read
+from scrnaseq_demux.utils import hash_string, BarcodeHandler
 
 
 class ChromosomeSNPLookup:

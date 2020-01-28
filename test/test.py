@@ -11,9 +11,9 @@ import pysam
 from orgalorg.omics.utils import read_vcf_to_header_and_pandas
 from pipeline.Stopwatch import Stopwatch
 
-from demultiplexit.demutiplexit import ProbabilisticGenotypes, TrainableDemultiplexer
-from demultiplexit.snp_counter import count_snps
-from demultiplexit.utils import BarcodeHandler
+from scrnaseq_demux.demutiplexit import ProbabilisticGenotypes, TrainableDemultiplexer
+from scrnaseq_demux.snp_counter import count_snps
+from scrnaseq_demux.utils import BarcodeHandler
 
 here = Path(__file__).parent
 

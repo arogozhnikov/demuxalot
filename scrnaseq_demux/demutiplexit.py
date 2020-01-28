@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import softmax
 
-from demultiplexit.utils import fast_np_add_at_1d, BarcodeHandler
+from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler
 
 
 class ProbabilisticGenotypes:
