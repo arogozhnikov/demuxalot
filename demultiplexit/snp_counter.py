@@ -194,6 +194,16 @@ def count_snps(
         that can be used by demultiplexer
     """
     chromosome2positions = list(chromosome2positions.items())
+    with pysam.AlignmentFile(bamfile_location) as f:
+        f: pysam.AlignmentFile = f
+        chromosome2nreads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
+
+        def chromosome_order(chromosome, positions):
+            # simple estimate for number of SNP calls
+            return -chromosome2nreads[chromosome] * len(positions) / f.get_reference_length(chromosome)
+
+        chromosome2positions = list(sorted(chromosome2positions, key=lambda chr_pos: chromosome_order(*chr_pos)))
+
     with joblib.Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity) as parallel:
         _cbub2qual_and_snps = parallel(
             joblib.delayed(count_call_variants_for_chromosome)(
@@ -206,4 +216,3 @@ def count_snps(
         )
     chromosome2cbub2qual_and_snps = dict(zip([chrom for chrom, _ in chromosome2positions], _cbub2qual_and_snps))
     return chromosome2cbub2qual_and_snps
-

@@ -100,14 +100,9 @@ with Stopwatch('verifying agreement'):
     assert np.allclose(_beta_priors1, _beta_priors2)
 
 with Stopwatch('new_snp_counting'):
-    # reorder so chromosomes with most reads are in the beginning
-    chromosomes = [contig for contig in bamfile.get_index_statistics()[:25]]
-    chromosomes = list(sorted(chromosomes, key=lambda contig: -1e20 if 'MT' in contig.contig else -contig.mapped))
-    chromosomes = [contig.contig for contig in chromosomes]
-
     chromosome2cbub2qual_and_snps = count_snps(
         bamfile_location=bamfile_location,
-        chromosome2positions={chr: genotypes_used.get_positions_for_chromosome(chr) for chr in chromosomes},
+        chromosome2positions=genotypes_used.get_chromosome2positions(),
         barcode_handler=barcode_handler,
     )
 
@@ -141,7 +136,7 @@ assert counter == {
     'GRCh38_______9': 854,
     'GRCh38_______MT': 24862,
     'GRCh38_______X': 384,
-    'GRCh38_______Y': 0}
+}
 
 for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
     print(chromosome, len(cbub2qual_and_snps))

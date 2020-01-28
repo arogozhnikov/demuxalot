@@ -106,6 +106,19 @@ class ProbabilisticGenotypes:
         positions = [pos for chromosome, pos in self.snips if chromosome == chromosome_name]
         return np.unique(np.asarray(positions, dtype=int))
 
+    def get_chromosome2positions(self):
+        chromosome2positions = defaultdict(list)
+        for chromosome, position in self.snips:
+            chromosome2positions[chromosome].append(position)
+
+        chromosome2positions = {
+            chromosome: np.unique(np.asarray(positions, dtype=int))
+            for chromosome, positions
+            in chromosome2positions.items()
+        }
+
+        return chromosome2positions
+
     def generate_genotype_snp_beta_prior(self):
         n_genotypes = len(self.genotype_names)
         n_snps = len(self.snips)
