@@ -11,9 +11,7 @@ import pysam
 from orgalorg.omics.utils import read_vcf_to_header_and_pandas
 from pipeline.Stopwatch import Stopwatch
 
-from scrnaseq_demux.demutiplexit import ProbabilisticGenotypes, TrainableDemultiplexer
-from scrnaseq_demux.snp_counter import count_snps
-from scrnaseq_demux.utils import BarcodeHandler
+from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
 
 here = Path(__file__).parent
 
@@ -142,7 +140,7 @@ for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
     print(chromosome, len(cbub2qual_and_snps))
 
 with Stopwatch(f'demux initialization'):
-    trainable_demultiplexer = TrainableDemultiplexer(
+    trainable_demultiplexer = Demultiplexer(
         chromosome2cbub2qual_and_snps,
         barcode2possible_genotypes={barcode: used_genotypes_names for barcode in barcode_handler.barcode2index},
         probabilistic_genotypes=genotypes_used,
@@ -168,7 +166,7 @@ reference = [-4.1255603, -4.2695103, -9.513682, -3.824123, -4.157081, -4.3482676
 assert np.allclose(np.max(logits, axis=0), reference)
 
 with Stopwatch('demux initialization again'):
-    trainable_demultiplexer2 = TrainableDemultiplexer(
+    trainable_demultiplexer2 = Demultiplexer(
         chromosome2cbub2qual_and_snps,
         barcode2possible_genotypes={barcode: used_genotypes_names for barcode in barcode_handler.barcode2index},
         barcode_handler=barcode_handler,

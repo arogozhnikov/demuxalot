@@ -166,7 +166,7 @@ class ProbabilisticGenotypes:
         pd.DataFrame(result).to_csv(path_or_buf, sep='\t', index=False)
 
 
-class TrainableDemultiplexer:
+class Demultiplexer:
     """
     Demultiplexer that can infer (learn) additional information about genotypes to achieve better quality.
 
