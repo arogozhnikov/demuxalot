@@ -44,6 +44,8 @@ with Stopwatch('construct genotypes from GSA'):
     genotypes_used = ProbabilisticGenotypes(used_genotypes_names)
     genotypes_used.add_vcf(vcf_filename, prior_strength=100)
 
+
+
 with Stopwatch('update genotypes with new SNPs'):
     # extend genotypes with added SNPs
     # saving learnt genotypes to a separate file
@@ -71,6 +73,11 @@ with Stopwatch('update genotypes with new SNPs'):
     pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
     print(f'Added {len(df["CHROM"]) // 2} new snps in total')
     genotypes_used.add_prior_betas(prior_filename, prior_strength=10)
+
+with Stopwatch('checking reverse order of addition'):
+    genotypes_trash = ProbabilisticGenotypes(used_genotypes_names)
+    genotypes_trash.add_prior_betas(prior_filename, prior_strength=10)
+    genotypes_trash.add_vcf(vcf_filename, prior_strength=100)
 
 with Stopwatch('check export'):
     posterior_filename = here / '_temp_exported_prior.tsv'

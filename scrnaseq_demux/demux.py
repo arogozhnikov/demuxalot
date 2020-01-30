@@ -57,9 +57,9 @@ class ProbabilisticGenotypes:
                     continue
                 if existing_ref_alt == (alt, ref):
                     # swapped ref and alt
-                    self.snips[chromosome, position][2] += priors[:, ::-1]
+                    self.snips[chromosome, position][2][:] += priors[:, ::-1]
                 else:
-                    self.snips[chromosome, position][2] += priors
+                    self.snips[chromosome, position][2][:] += priors
             else:
                 self.snips[chromosome, position] = (ref, alt, priors)
 
