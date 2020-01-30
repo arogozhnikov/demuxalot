@@ -356,10 +356,12 @@ class Demultiplexer:
             data=barcode_posterior_logits,
             index=list(self.barcode2bindex), columns=column_names,
         )
+        logits_df.index.name = 'BARCODE'
         probs_df = pd.DataFrame(
             data=softmax(barcode_posterior_logits, axis=1),
             index=list(self.barcode2bindex), columns=column_names,
         )
+        probs_df.index.name = 'BARCODE'
         return logits_df, probs_df
 
     def run_fast_em_iterations_without_self_effect(self, n_iterations=10):

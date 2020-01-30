@@ -44,8 +44,6 @@ with Stopwatch('construct genotypes from GSA'):
     genotypes_used = ProbabilisticGenotypes(used_genotypes_names)
     genotypes_used.add_vcf(vcf_filename, prior_strength=100)
 
-
-
 with Stopwatch('update genotypes with new SNPs'):
     # extend genotypes with added SNPs
     # saving learnt genotypes to a separate file
