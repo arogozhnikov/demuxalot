@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pysam
 # TODO get rid of orgalorg dependency. and of pipeline dependency
-from orgalorg.omics.utils import read_vcf_to_header_and_pandas
+from orgalorg.omics.utils import read_vcf_to_header_and_pandas, write_vcf_from_header_and_pandas
 from pipeline.Stopwatch import Stopwatch
 
 from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
@@ -37,15 +37,12 @@ def filter_snps(snps, genotype_names):
     return snps[mask]
 
 
-with Stopwatch('read GSA vcf'):
-    _, all_snps = read_vcf_to_header_and_pandas(here / 'system1_merged_v4_mini.vcf')
-    all_genotypes_names = list(all_snps.columns[9:])
-    all_snps = filter_snps(all_snps, genotype_names=all_genotypes_names)
-
 with Stopwatch('construct genotypes from GSA'):
+    vcf_filename = here / 'system1_merged_v4_mini_cleared.vcf'
+
     used_genotypes_names = list(np.unique(sum(lane2inferred_genotypes.values(), [])).tolist())
     genotypes_used = ProbabilisticGenotypes(used_genotypes_names)
-    genotypes_used.add_vcf(all_snps, prior_strength=100)
+    genotypes_used.add_vcf(vcf_filename, prior_strength=100)
 
 with Stopwatch('update genotypes with new SNPs'):
     # extend genotypes with added SNPs
@@ -150,12 +147,26 @@ with Stopwatch(f'demux initialization'):
 with Stopwatch('demultiplexing'):
     for barcode_posterior_probs_df, debug_info in trainable_demultiplexer.staged_genotype_learning(n_iterations=3):
         print('one more iteration complete')
-        logits2 = trainable_demultiplexer.predict_posteriors(
+        logits2, probs = trainable_demultiplexer.predict_posteriors(
             debug_info['genotype_snp_posterior'],
             chromosome2cbub2qual_and_snps,
             barcode_handler, only_singlets=True)
         logits = debug_info['barcode_logits']
+        assert np.allclose(np.sum(probs, axis=1), 1)
         assert np.allclose(logits, logits2)
+
+with Stopwatch('checking doublets'):
+    logits_singlet, _ = trainable_demultiplexer.predict_posteriors(
+        debug_info['genotype_snp_posterior'],
+        chromosome2cbub2qual_and_snps,
+        barcode_handler, only_singlets=True
+    )
+    logits_doublet, _ = trainable_demultiplexer.predict_posteriors(
+        debug_info['genotype_snp_posterior'],
+        chromosome2cbub2qual_and_snps,
+        barcode_handler, only_singlets=False
+    )
+    assert np.allclose(logits_singlet, logits_doublet.loc[:, logits_singlet.columns])
 
 print(list(np.max(logits, axis=0)))
 
@@ -184,12 +195,13 @@ assert np.allclose(debug_info['genotype_snp_posterior'], debug_info2['genotype_s
 with Stopwatch('importing difference'):
     genotypes_learnt = ProbabilisticGenotypes(used_genotypes_names)
     genotypes_learnt.add_prior_betas(learnt_genotypes_filename, prior_strength=1.)
-    assert genotypes_learnt.generate_genotype_snp_beta_prior()[:2] == genotypes_used.generate_genotype_snp_beta_prior()[:2]
+    assert genotypes_learnt.generate_genotype_snp_beta_prior()[:2] == genotypes_used.generate_genotype_snp_beta_prior()[
+                                                                      :2]
     _, _, _beta_prior = genotypes_learnt.generate_genotype_snp_beta_prior()
 
     assert np.allclose(_beta_prior, debug_info['genotype_snp_posterior'])
 
-    logits3 = trainable_demultiplexer2.predict_posteriors(
+    logits3, _ = trainable_demultiplexer2.predict_posteriors(
         _beta_prior,
         chromosome2cbub2qual_and_snps,
         barcode_handler=barcode_handler, only_singlets=True)

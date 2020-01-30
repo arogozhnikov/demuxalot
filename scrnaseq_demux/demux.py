@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import softmax
 
-from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler
+from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, read_vcf_to_header_and_pandas
 
 
 class ProbabilisticGenotypes:
@@ -27,16 +27,16 @@ class ProbabilisticGenotypes:
         return f'<Genotypes with {len(self.genotype_names)} genotypes: {self.genotype_names} ' \
                f'and {len(self.snips)} SNVs >'
 
-    def add_vcf(self, snp_df, prior_strength=100, verbose=False):
+    def add_vcf(self, vcf_file_name, prior_strength=100, verbose=False):
         """
         Add information from parsed VCF
-        :param snp_df: pd.DataFrame with information about genotypes.
-            Columns are genotypes + ["CHROM", "POS", "REF", "ALT"], rows are SNPs. Values are (0/0, 0/1, 1/1, ./.)
+        :param vcf_file_name: path to VCF file. Only diploid values are accepted (0/0, 0/1, 1/1, ./.).
             Should contain all genotypes of interest. Can contain additional genotypes, but those will be ignored.
         """
-        # TODO parse VCF right here
         type2code = {"0/0": 0, "0/1": 1, "1/1": 2, "./.": 3}
         code2prior = np.array([[0.99, 0.01], [0.50, 0.50], [0.01, 0.99], [0, 0]], dtype='float32') * prior_strength
+
+        _header, snp_df = read_vcf_to_header_and_pandas(vcf_file_name)
 
         snp_df = snp_df.set_index(["CHROM", "POS", "REF", "ALT"])[self.genotype_names].replace(type2code).astype(
             "uint8")
@@ -308,6 +308,7 @@ class Demultiplexer:
             barcode_handler,
             only_singlets: bool,
             p_genotype_clip=0.01,
+            doublet_prior=0.35,
     ):
         assert isinstance(genotype_snp_posterior, np.ndarray)
         assert genotype_snp_posterior.shape[0] == len(self.snp2sindex)
@@ -319,25 +320,47 @@ class Demultiplexer:
         genotype_prob = genotype_snp_posterior / genotype_snp_posterior.sum(axis=-1, keepdims=True)
         genotype_prob = genotype_prob.clip(p_genotype_clip, 1 - p_genotype_clip)
 
+        n_genotypes = len(self.genotype2gindex)
         if only_singlets:
-            barcode_posterior_logits = np.zeros([len(self.barcode2bindex), len(self.genotype2gindex)], dtype="float32")
-            for gindex in self.genotype2gindex.values():
-                p = genotype_prob[snp_sindices, gindex, snp_is_alt]
-                log_penalties = np.log(p * (1 - snp_p_wrong) + snp_p_wrong.clip(1e-4))
-                fast_np_add_at_1d(barcode_posterior_logits[:, gindex], snp_bindices, log_penalties)
-            return barcode_posterior_logits
+            barcode_posterior_logits = np.zeros([len(self.barcode2bindex), n_genotypes], dtype="float32")
         else:
-            barcode_posterior_logits = np.zeros(
-                [len(self.barcode2bindex), len(self.genotype2gindex), len(self.genotype2gindex)], dtype="float32"
-            )
-            for gindex1 in self.genotype2gindex.values():
-                for gindex2 in self.genotype2gindex.values():
-                    p1 = genotype_prob[snp_sindices, gindex1, snp_is_alt]
-                    p2 = genotype_prob[snp_sindices, gindex2, snp_is_alt]
-                    p = (p1 + p2) * 0.5
-                    log_penalties = np.log(p * (1 - snp_p_wrong) + snp_p_wrong.clip(1e-4))
-                    fast_np_add_at_1d(barcode_posterior_logits[:, gindex1, gindex2], snp_bindices, log_penalties)
-            return barcode_posterior_logits
+            barcode_posterior_logits = np.zeros([len(self.barcode2bindex), n_genotypes * (n_genotypes + 1) // 2])
+
+        column_names = []
+        for genotype, gindex in self.genotype2gindex.items():
+            p = genotype_prob[snp_sindices, gindex, snp_is_alt]
+            log_penalties = np.log(p * (1 - snp_p_wrong) + snp_p_wrong.clip(1e-4))
+            fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], snp_bindices, log_penalties)
+            column_names += [genotype]
+
+        if not only_singlets:
+            # computing correction for doublet as the prior proportion of doublets will
+            # otherwise depend on number of genotypes. Correction comes from
+            #  n_singlet_options / singlet_prior =
+            #  = n_doublet_options / doublet_prior * np.exp(doublet_logit_bonus)
+            doublet_logit_bonus = np.log(n_genotypes * doublet_prior)
+            doublet_logit_bonus -= np.log(n_genotypes * max(n_genotypes - 1, 0.01) / 2 * (1 - doublet_prior))
+
+            for genotype1, gindex1 in self.genotype2gindex.items():
+                for genotype2, gindex2 in self.genotype2gindex.items():
+                    if gindex1 < gindex2:
+                        p1 = genotype_prob[snp_sindices, gindex1, snp_is_alt]
+                        p2 = genotype_prob[snp_sindices, gindex2, snp_is_alt]
+                        p = (p1 + p2) * 0.5
+                        log_penalties = np.log(p * (1 - snp_p_wrong) + snp_p_wrong.clip(1e-4))
+                        fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], snp_bindices, log_penalties)
+                        barcode_posterior_logits[:, len(column_names)] += doublet_logit_bonus
+                        column_names += [f'{genotype1}+{genotype2}']
+
+        logits_df = pd.DataFrame(
+            data=barcode_posterior_logits,
+            index=list(self.barcode2bindex), columns=column_names,
+        )
+        probs_df = pd.DataFrame(
+            data=softmax(barcode_posterior_logits, axis=1),
+            index=list(self.barcode2bindex), columns=column_names,
+        )
+        return logits_df, probs_df
 
     def run_fast_em_iterations_without_self_effect(self, n_iterations=10):
         snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = self.compress_snp_calls(self.mindex2bindex, self.snps)
