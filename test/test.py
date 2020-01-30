@@ -147,20 +147,21 @@ with Stopwatch(f'demux initialization'):
 with Stopwatch('demultiplexing'):
     for barcode_posterior_probs_df, debug_info in trainable_demultiplexer.staged_genotype_learning(n_iterations=3):
         print('one more iteration complete')
-        logits2 = trainable_demultiplexer.predict_posteriors(
+        logits2, probs = trainable_demultiplexer.predict_posteriors(
             debug_info['genotype_snp_posterior'],
             chromosome2cbub2qual_and_snps,
             barcode_handler, only_singlets=True)
         logits = debug_info['barcode_logits']
+        assert np.allclose(np.sum(probs, axis=1), 1)
         assert np.allclose(logits, logits2)
 
 with Stopwatch('checking doublets'):
-    logits_singlet = trainable_demultiplexer.predict_posteriors(
+    logits_singlet, _ = trainable_demultiplexer.predict_posteriors(
         debug_info['genotype_snp_posterior'],
         chromosome2cbub2qual_and_snps,
         barcode_handler, only_singlets=True
     )
-    logits_doublet = trainable_demultiplexer.predict_posteriors(
+    logits_doublet, _ = trainable_demultiplexer.predict_posteriors(
         debug_info['genotype_snp_posterior'],
         chromosome2cbub2qual_and_snps,
         barcode_handler, only_singlets=False
@@ -200,7 +201,7 @@ with Stopwatch('importing difference'):
 
     assert np.allclose(_beta_prior, debug_info['genotype_snp_posterior'])
 
-    logits3 = trainable_demultiplexer2.predict_posteriors(
+    logits3, _ = trainable_demultiplexer2.predict_posteriors(
         _beta_prior,
         chromosome2cbub2qual_and_snps,
         barcode_handler=barcode_handler, only_singlets=True)

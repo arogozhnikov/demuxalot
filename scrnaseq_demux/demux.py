@@ -323,29 +323,23 @@ class Demultiplexer:
         n_genotypes = len(self.genotype2gindex)
         if only_singlets:
             barcode_posterior_logits = np.zeros([len(self.barcode2bindex), n_genotypes], dtype="float32")
-            for gindex in self.genotype2gindex.values():
-                p = genotype_prob[snp_sindices, gindex, snp_is_alt]
-                log_penalties = np.log(p * (1 - snp_p_wrong) + snp_p_wrong.clip(1e-4))
-                fast_np_add_at_1d(barcode_posterior_logits[:, gindex], snp_bindices, log_penalties)
-            return pd.DataFrame(
-                data=barcode_posterior_logits,
-                index=list(self.barcode2bindex), columns=list(self.genotype2gindex)
-            )
         else:
+            barcode_posterior_logits = np.zeros([len(self.barcode2bindex), n_genotypes * (n_genotypes + 1) // 2])
+
+        column_names = []
+        for genotype, gindex in self.genotype2gindex.items():
+            p = genotype_prob[snp_sindices, gindex, snp_is_alt]
+            log_penalties = np.log(p * (1 - snp_p_wrong) + snp_p_wrong.clip(1e-4))
+            fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], snp_bindices, log_penalties)
+            column_names += [genotype]
+
+        if not only_singlets:
             # computing correction for doublet as the prior proportion of doublets will
             # otherwise depend on number of genotypes. Correction comes from
             #  n_singlet_options / singlet_prior =
             #  = n_doublet_options / doublet_prior * np.exp(doublet_logit_bonus)
             doublet_logit_bonus = np.log(n_genotypes * doublet_prior)
             doublet_logit_bonus -= np.log(n_genotypes * max(n_genotypes - 1, 0.01) / 2 * (1 - doublet_prior))
-
-            column_names = []
-            barcode_posterior_logits = np.zeros([len(self.barcode2bindex), n_genotypes * (n_genotypes + 1) // 2])
-            for genotype, gindex in self.genotype2gindex.items():
-                p = genotype_prob[snp_sindices, gindex, snp_is_alt]
-                log_penalties = np.log(p * (1 - snp_p_wrong) + snp_p_wrong.clip(1e-4))
-                fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], snp_bindices, log_penalties)
-                column_names += [genotype]
 
             for genotype1, gindex1 in self.genotype2gindex.items():
                 for genotype2, gindex2 in self.genotype2gindex.items():
@@ -358,10 +352,15 @@ class Demultiplexer:
                         barcode_posterior_logits[:, len(column_names)] += doublet_logit_bonus
                         column_names += [f'{genotype1}+{genotype2}']
 
-            return pd.DataFrame(
-                data=barcode_posterior_logits,
-                index=list(self.barcode2bindex), columns=column_names
-            )
+        logits_df = pd.DataFrame(
+            data=barcode_posterior_logits,
+            index=list(self.barcode2bindex), columns=column_names,
+        )
+        probs_df = pd.DataFrame(
+            data=softmax(barcode_posterior_logits, axis=1),
+            index=list(self.barcode2bindex), columns=column_names,
+        )
+        return logits_df, probs_df
 
     def run_fast_em_iterations_without_self_effect(self, n_iterations=10):
         snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = self.compress_snp_calls(self.mindex2bindex, self.snps)
