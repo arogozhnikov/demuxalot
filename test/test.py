@@ -7,10 +7,9 @@ import joblib
 import numpy as np
 import pandas as pd
 import pysam
-# TODO get rid of orgalorg dependency. and of pipeline dependency
-from orgalorg.omics.utils import read_vcf_to_header_and_pandas, write_vcf_from_header_and_pandas
-from pipeline.Stopwatch import Stopwatch
 
+# TODO get rid of pipeline dependency
+from pipeline.Stopwatch import Stopwatch
 from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
 
 here = Path(__file__).parent
@@ -71,6 +70,11 @@ with Stopwatch('update genotypes with new SNPs'):
     pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
     print(f'Added {len(df["CHROM"]) // 2} new snps in total')
     genotypes_used.add_prior_betas(prior_filename, prior_strength=10)
+
+with Stopwatch('checking reverse order of addition'):
+    genotypes_trash = ProbabilisticGenotypes(used_genotypes_names)
+    genotypes_trash.add_prior_betas(prior_filename, prior_strength=10)
+    genotypes_trash.add_vcf(vcf_filename, prior_strength=100)
 
 with Stopwatch('check export'):
     posterior_filename = here / '_temp_exported_prior.tsv'
@@ -156,17 +160,22 @@ with Stopwatch('demultiplexing'):
         assert np.allclose(logits, logits2)
 
 with Stopwatch('checking doublets'):
-    logits_singlet, _ = trainable_demultiplexer.predict_posteriors(
+    args = (
         debug_info['genotype_snp_posterior'],
         chromosome2cbub2qual_and_snps,
-        barcode_handler, only_singlets=True
+        barcode_handler,
     )
-    logits_doublet, _ = trainable_demultiplexer.predict_posteriors(
-        debug_info['genotype_snp_posterior'],
-        chromosome2cbub2qual_and_snps,
-        barcode_handler, only_singlets=False
-    )
+    logits_singlet, _ = trainable_demultiplexer.predict_posteriors(*args, only_singlets=True)
+    logits_doublet, _ = trainable_demultiplexer.predict_posteriors(*args, only_singlets=False)
     assert np.allclose(logits_singlet, logits_doublet.loc[:, logits_singlet.columns])
+
+with Stopwatch('check demultiplexing for different stage'):
+    common_args = (chromosome2cbub2qual_and_snps, barcode_handler, True)
+    post1 = trainable_demultiplexer.predict_posteriors(
+        genotypes_trash.generate_genotype_snp_beta_prior()[-1], *common_args)
+    post2 = trainable_demultiplexer.predict_posteriors(genotypes_used, *common_args)
+    assert np.all(post1[0] == post2[0])
+    assert np.all(post1[1] == post2[1])
 
 print(list(np.max(logits, axis=0)))
 

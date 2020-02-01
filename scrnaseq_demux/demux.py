@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import pandas as pd
@@ -57,9 +57,9 @@ class ProbabilisticGenotypes:
                     continue
                 if existing_ref_alt == (alt, ref):
                     # swapped ref and alt
-                    self.snips[2] += priors[:, ::-1]
+                    self.snips[chromosome, position][2][:] += priors[:, ::-1]
                 else:
-                    self.snips[2] += priors
+                    self.snips[chromosome, position][2][:] += priors
             else:
                 self.snips[chromosome, position] = (ref, alt, priors)
 
@@ -303,21 +303,26 @@ class Demultiplexer:
 
     def predict_posteriors(
             self,
-            genotype_snp_posterior,
+            genotype_or_snp_posterior: Union[ProbabilisticGenotypes, np.ndarray],
             chromosome2cbub2qual_and_snps,
             barcode_handler,
             only_singlets: bool,
             p_genotype_clip=0.01,
             doublet_prior=0.35,
     ):
-        assert isinstance(genotype_snp_posterior, np.ndarray)
-        assert genotype_snp_posterior.shape[0] == len(self.snp2sindex)
-        assert genotype_snp_posterior.shape[1] == len(self.genotype2gindex)
+        if isinstance(genotype_or_snp_posterior, ProbabilisticGenotypes):
+            _, _, snp_posterior = genotype_or_snp_posterior.generate_genotype_snp_beta_prior()
+        else:
+            snp_posterior = genotype_or_snp_posterior
+
+        assert isinstance(snp_posterior, np.ndarray)
+        assert snp_posterior.shape[0] == len(self.snp2sindex)
+        assert snp_posterior.shape[1] == len(self.genotype2gindex)
 
         self.mindex2bindex, self.snps = self.preprocess_snp_calls(barcode_handler, chromosome2cbub2qual_and_snps)
         snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = self.compress_snp_calls(self.mindex2bindex, self.snps)
 
-        genotype_prob = genotype_snp_posterior / genotype_snp_posterior.sum(axis=-1, keepdims=True)
+        genotype_prob = snp_posterior / snp_posterior.sum(axis=-1, keepdims=True)
         genotype_prob = genotype_prob.clip(p_genotype_clip, 1 - p_genotype_clip)
 
         n_genotypes = len(self.genotype2gindex)
@@ -356,10 +361,12 @@ class Demultiplexer:
             data=barcode_posterior_logits,
             index=list(self.barcode2bindex), columns=column_names,
         )
+        logits_df.index.name = 'BARCODE'
         probs_df = pd.DataFrame(
             data=softmax(barcode_posterior_logits, axis=1),
             index=list(self.barcode2bindex), columns=column_names,
         )
+        probs_df.index.name = 'BARCODE'
         return logits_df, probs_df
 
     def run_fast_em_iterations_without_self_effect(self, n_iterations=10):
