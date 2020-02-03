@@ -298,8 +298,8 @@ class Demultiplexer:
 
     @staticmethod
     def predict_posteriors(
-            genotypes: ProbabilisticGenotypes,
             chromosome2cbub2qual_and_snps,
+            genotypes: ProbabilisticGenotypes,
             barcode_handler: BarcodeHandler,
             only_singlets: bool,
             p_genotype_clip=0.01,
