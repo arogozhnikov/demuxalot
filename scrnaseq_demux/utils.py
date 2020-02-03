@@ -22,10 +22,19 @@ class BarcodeHandler:
     def __init__(self, barcodes):
         """Barcode handler is needed to compress barcodes to integers,
         because strings take too much space  """
+        assert not isinstance(barcodes, str), 'construct by passing list of possible barcodes'
         barcodes = list(barcodes)
         assert len(set(barcodes)) == len(barcodes), "all passed barcodes should be unique"
+        self.ordered_barcodes = barcodes
         self.barcode2index = {bc: i for i, bc in enumerate(barcodes)}
-        self.index2barcode = {i: bc for i, bc in enumerate(barcodes)}
+
+    @staticmethod
+    def from_file(barcodes_filename):
+        """
+        :param barcodes_filename: path to barcodes.csv or barcodes.csv.gz where each line is a barcode
+        """
+        barcodes = pd.read_csv(barcodes_filename, header=None)[0].values
+        return BarcodeHandler(barcodes)
 
 
 def read_vcf_to_header_and_pandas(vcf_filename):
