@@ -26,11 +26,11 @@ Typical approach to get genotype-specific mutations are
 
 ## Why is it worth refining genotypes? 
    
-GSA provides you up to 650k positions in the genome.
+GSA provides you up to 650k (as of 2020) positions in the genome.
 Around 20-30% of them would be specific for a genotype.
 
 - Each genotype has around 10 times more SNV (single nucleotide variations)
-- However most of them will not contribute to demultiplexing
+- However most of SNVs can't contribute to demultiplexing
   - because scRnaSeq consists of reads that are <700 basepairs apart from poly-A tail  
   - this also implies that we only need to learn genotypic information about these positions 
 
@@ -38,13 +38,13 @@ Around 20-30% of them would be specific for a genotype.
 
 - much better handling of multiple reads coming from the same UMI
   - `scrnaseq_demux` can efficiently combine information
-  - this comes at the cost of higher memory consumption
+  - this comes at the cost of significantly higher memory consumption
 - default settings are CellRanger-specific. Cellranger's and STAR's flags in BAM break common conventions, 
-  - but you can still efficiently use those, you just need to provide alternative filtering  
+  - but you can still efficiently use those, you just need to provide alternative filtering callbacks  
 - ability to refine genotypes. without failing 
   - Vireo is a tool that was created with similar purposes. But it either diverges or does not learn better genotypes
-- optimized variant calling (compared to CellSNP). It also wins demuxlet due to multiprocessing
-- this is not a command-line tool. 
+- optimized variant calling (compared to `CellSNP`). It also wins `demuxlet` due to multiprocessing
+- this is not a command-line tool! 
   - You will write python code, this gives you full control and flexibility of demultiplexing.
 
 ## Installation
