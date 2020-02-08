@@ -15,7 +15,7 @@ def discard_read(read: AlignedRead) -> bool:
     return False
 
 
-def compute_p_mistake(read: AlignedRead):
+def compute_p_misaligned(read: AlignedRead) -> float:
     if read.get_tag("AS") <= len(read.seq) - 8:
         # more than 2 edits. Suspicious
         # This cuts out information about too small genes, but it will ne ignored only during demultiplexing

@@ -4,7 +4,7 @@ import joblib
 import numpy as np
 import pysam
 
-from scrnaseq_demux.cellranger_specific import compute_p_mistake, discard_read
+from scrnaseq_demux.cellranger_specific import compute_p_misaligned, discard_read
 from scrnaseq_demux.utils import hash_string, BarcodeHandler
 
 
@@ -131,8 +131,8 @@ def count_call_variants_for_chromosome(
         chromosome,
         chromosome_snps_zero_based,
         cellbarcode_compressor,
-        compute_p_read_misaligned=compute_p_mistake,
-        discard_read=discard_read,
+        compute_p_read_misaligned,
+        discard_read,
         verbose=False,
 ):
     prev_segment = None
@@ -179,16 +179,23 @@ def count_snps(
         chromosome2positions: Dict[str, np.ndarray],
         barcode_handler: BarcodeHandler,
         joblib_n_jobs=-1,
-        joblib_verbosity=11
+        joblib_verbosity=11,
+        compute_p_misaligned=compute_p_misaligned,
+        discard_read=discard_read,
 ):
     """
     Computes which molecules can provide information about SNPs
+
     :param bamfile_location: bam file, local path. It's going to be extensively read in multiple threads
     :param chromosome2positions: which positions are of interest for each chromosome,
         dictionary mapping chromosome name to np.ndarray of SNP positions within chromosome
-    :param barcode_handler:
+    :param barcode_handler: handler which picks
     :param joblib_n_jobs: how many threads to run in parallel
     :param joblib_verbosity: verbosity level as interpreted by joblib
+    :param compute_p_misaligned: callback that estimates probability of read being misaligned
+    :param discard_read: callback that decides if aligned read should be discarded from demultiplexing analysis
+
+    see cellranger_specific.py for examples of callbacks specific for cellranger
 
     :return: returns an object which stores information about molecules, their SNPs and barcodes,
         that can be used by demultiplexer
@@ -211,6 +218,8 @@ def count_snps(
                 chromosome,
                 positions,
                 cellbarcode_compressor=lambda cb: barcode_handler.barcode2index.get(cb, None),
+                compute_p_read_misaligned=compute_p_misaligned,
+                discard_read=discard_read,
             )
             for chromosome, positions in chromosome2positions
         )
