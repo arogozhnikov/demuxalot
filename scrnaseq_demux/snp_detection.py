@@ -1,12 +1,13 @@
+from collections import defaultdict, Counter
+
+import numpy as np
+import pandas as pd
+import pysam
+from joblib import Parallel, delayed
+
 from . import cellranger_specific
 from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
 from .snp_counter import count_call_variants_for_chromosome, count_snps, CompressedSNPCalls
-import pysam
-from joblib import Parallel, delayed
-import numpy as np
-import pandas as pd
-from collections import defaultdict, Counter
-
 from .utils import decompress_base
 
 

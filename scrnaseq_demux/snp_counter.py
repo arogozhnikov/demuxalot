@@ -227,10 +227,10 @@ def count_call_variants_for_chromosome(
         bamfile_or_filename = pysam.AlignmentFile(bamfile_or_filename)
 
     for read in bamfile_or_filename.fetch(chromosome):
-        curr_segment = read.pos // 10 ** 6
+        curr_segment = read.pos // 1000
         if curr_segment != prev_segment:
             compress_old_cbub_groups(
-                read.pos - 10 ** 6, cbub2position_and_reads, compressed_snp_calls, snp_lookup,
+                read.pos - 1000, cbub2position_and_reads, compressed_snp_calls, snp_lookup,
                 compute_p_read_misaligned,
             )
             prev_segment = curr_segment
