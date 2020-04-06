@@ -128,41 +128,46 @@ class TestClass(unittest.TestCase):
                 chromosome2positions=self.genotypes_used.get_chromosome2positions(),
                 barcode_handler=self.barcode_handler,
             )
+        # TODO delete
+        import pickle
+        print(len(pickle.dumps(chromosome2cbub2qual_and_snps, protocol=-1)))
 
-            counter = {
-                chromosome: len(cals) for chromosome, cals in chromosome2cbub2qual_and_snps.items()
-            }
-            pprint.pprint(counter)
-
-        assert counter == {
-            'GRCh38_______1': 3916,
-            'GRCh38_______10': 765,
-            'GRCh38_______11': 7682,
-            'GRCh38_______12': 1393,
-            'GRCh38_______13': 376,
-            'GRCh38_______14': 851,
-            'GRCh38_______15': 1261,
-            'GRCh38_______16': 1882,
-            'GRCh38_______17': 2837,
-            'GRCh38_______18': 124,
-            'GRCh38_______19': 5428,
-            'GRCh38_______2': 2166,
-            'GRCh38_______20': 1376,
-            'GRCh38_______21': 95,
-            'GRCh38_______22': 1763,
-            'GRCh38_______3': 2926,
-            'GRCh38_______4': 1011,
-            'GRCh38_______5': 739,
-            'GRCh38_______6': 2122,
-            'GRCh38_______7': 2306,
-            'GRCh38_______8': 2201,
-            'GRCh38_______9': 852,
-            'GRCh38_______MT': 24861,
-            'GRCh38_______X': 384
-        }
-
+        #     counter = {
+        #         chromosome: len(cals) for chromosome, cals in chromosome2cbub2qual_and_snps.items()
+        #     }
+        #     pprint.pprint(counter)
+        #
+        # assert counter == {
+        #     'GRCh38_______1': 3916,
+        #     'GRCh38_______10': 765,
+        #     'GRCh38_______11': 7682,
+        #     'GRCh38_______12': 1393,
+        #     'GRCh38_______13': 376,
+        #     'GRCh38_______14': 851,
+        #     'GRCh38_______15': 1261,
+        #     'GRCh38_______16': 1882,
+        #     'GRCh38_______17': 2837,
+        #     'GRCh38_______18': 124,
+        #     'GRCh38_______19': 5428,
+        #     'GRCh38_______2': 2166,
+        #     'GRCh38_______20': 1376,
+        #     'GRCh38_______21': 95,
+        #     'GRCh38_______22': 1763,
+        #     'GRCh38_______3': 2926,
+        #     'GRCh38_______4': 1011,
+        #     'GRCh38_______5': 739,
+        #     'GRCh38_______6': 2122,
+        #     'GRCh38_______7': 2306,
+        #     'GRCh38_______8': 2201,
+        #     'GRCh38_______9': 852,
+        #     'GRCh38_______MT': 24861,
+        #     'GRCh38_______X': 384
+        # }
+        #
+        # for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
+        #     print(chromosome, len(cbub2qual_and_snps))
         for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
-            print(chromosome, len(cbub2qual_and_snps))
+            print(chromosome, len(cbub2qual_and_snps.mindex2cb_ub_p_group_misaligned))
         return chromosome2cbub2qual_and_snps
 
     def test_demultiplexing_singlets_vs_doublets(self):

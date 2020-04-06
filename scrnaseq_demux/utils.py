@@ -5,13 +5,28 @@ import pandas as pd
 def hash_string(s):
     """
     Used to compress UB (molecule barcodes) to group identical ones.
-    Mapping is unique and fast for
+    Mapping is unique and fast for UBs used.
     """
     result = 0
     for c in s:
         result *= 5
         result += ord(c)
     return result
+
+
+base_lookup = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 4}
+
+
+def compress_base(base):
+    return base_lookup[base]
+
+
+def decompress_base(base_index):
+    return 'ACGTN'[base_index]
+
+
+for base, base_index in base_lookup.items():
+    assert decompress_base(compress_base(base)) == base
 
 
 def fast_np_add_at_1d(x, indices, weights):

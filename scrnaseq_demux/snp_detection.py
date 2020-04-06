@@ -45,6 +45,7 @@ def detect_snps_for_chromosome(
             candidate_positions = np.sort(candidate_positions)
 
     # stage2. collect detailed counts about snp candidates
+    # TODO optimization - minimize amount of barcodes here to those have donor associated?
     cbub2qual_and_snps = count_call_variants_for_chromosome(
         bamfile_path,
         chromosome=chromosome,
@@ -54,16 +55,9 @@ def detect_snps_for_chromosome(
         discard_read=discard_read,
     )
     donor2dindex = {donor: dindex for dindex, donor in enumerate(sorted_donors)}
-    # TODO limit counts from barcode
-    position2donor2base2count = defaultdict(lambda: np.zeros([len(sorted_donors), 4], dtype='int32'))
-    for (cb_compressed, ub), (_, snps) in cbub2qual_and_snps.items():
-        donor = barcode2donor.get(barcode_handler.ordered_barcodes[cb_compressed], None)
-        if donor is None:
-            continue
 
-        for reference_position, base, p_base_wrong in snps:
-            if p_base_wrong < 0.01:
-                position2donor2base2count[reference_position][donor2dindex[donor], 'ACGT'.index(base)] += 1
+    position2donor2base2count = _count_snp_stats_for_donors(
+        cbub2qual_and_snps, barcode_handler, barcode2donor, donor2dindex)
 
     # which positions are best?
     def importance_and_base_counts(counts):
@@ -91,6 +85,29 @@ def detect_snps_for_chromosome(
         (chromosome, position) + importance_and_base_counts(counts)
         for position, counts in position2donor2base2count.items()
     ]
+
+
+def _count_snp_stats_for_donors(cbub2qual_and_snps, barcode_handler,
+                                barcode2donor, donor2dindex,
+                                max_contribution_to_base_count_from_barcode=3.):
+    # computes bases at position for each donor given guesses for different barcodes
+    # limits contribution
+    barcode_snp2counts = Counter()
+    for (cb_compressed, ub), (_, snps) in cbub2qual_and_snps.items():
+        barcode = barcode_handler.ordered_barcodes[cb_compressed]
+        for reference_position, base, p_base_wrong in snps:
+            # ignores too bad positions
+            if p_base_wrong < 0.01:
+                barcode_snp2counts[barcode, reference_position, base] += 1
+    position2donor2base2count = defaultdict(lambda: np.zeros([len(donor2dindex), 4], dtype='int32'))
+
+    for (barcode, reference_position, base), count in barcode_snp2counts.items():
+        donor = barcode2donor.get(barcode, None)
+        if donor is None:
+            continue
+        contribution = min(max_contribution_to_base_count_from_barcode, count)
+        position2donor2base2count[reference_position][donor2dindex[donor], 'ACGT'.index(base)] += contribution
+    return position2donor2base2count
 
 
 def detect_snps_positions(

@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 from scipy.special import softmax
 
-from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, read_vcf_to_header_and_pandas
+from scrnaseq_demux.snp_counter import CompressedSNPCalls
+from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, read_vcf_to_header_and_pandas, decompress_base
 
 
 class ProbabilisticGenotypes:
@@ -180,33 +181,32 @@ class Demultiplexer:
       - easier to compute posterior for different mixtures
       - hard to limit contribution of a single SNP (this was deciding after all)
     - second is to compute contributions of SNPs
-      - limiting contribution from a single cb+ub is hard, but it is limited by group size and
+      - in this case limiting contribution from a single cb+ub is hard, but it is limited by group size and
         number of possible modifications (AS limit in terms of cellranger/STAR alignment)
     Second one is used here.
     """
 
     @staticmethod
-    def preprocess_snp_calls(chromosome2cbub2qual_and_snps,
+    def preprocess_snp_calls(chromosome2compressed_snp_calls,
                              snp2ref_alt,
                              snp2sindex):
-        preprocessed_snps = []  # (mindex, sindex, is_alt, p_base_wrong)
-        mindex2bindex = []
-        for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
-            for (bindex, _ub), (_p_group_misaligned, snps) in cbub2qual_and_snps.items():
-                molecule_index = len(mindex2bindex)
-                mindex2bindex.append(bindex)
-                for snp_position, base, p_base_wrong in snps:
-                    # only handle situations with either ref or alt. skip otherwise
-                    ref, alt = snp2ref_alt[chromosome, snp_position]
-                    if base in (ref, alt):
-                        is_alt = base == alt
-                        snp = (
-                            molecule_index,
-                            snp2sindex[chromosome, snp_position],
-                            is_alt,
-                            p_base_wrong,
-                        )
-                        preprocessed_snps.append(snp)
+
+        mindex2bindex, merged_snps = CompressedSNPCalls.merge(list(chromosome2compressed_snp_calls.items()), snp2sindex)
+        preprocessed_snps = []
+        sindex2ref_alt = {sindex: snp2ref_alt[chrom_pos] for chrom_pos, sindex in snp2sindex.items()}
+        for molecule_index, sindex, base_index, p_base_wrong in merged_snps:
+            # only handle situations with either ref or alt. skip otherwise
+            ref, alt = sindex2ref_alt[sindex]
+            base = decompress_base(base_index)
+            if base in (ref, alt):
+                is_alt = base == alt
+                snp = (
+                    molecule_index,
+                    sindex,
+                    is_alt,
+                    p_base_wrong,
+                )
+                preprocessed_snps.append(snp)
         return mindex2bindex, preprocessed_snps
 
     @staticmethod
