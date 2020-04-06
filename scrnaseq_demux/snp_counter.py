@@ -72,7 +72,7 @@ def double_array(array):
 
 # TODO not ignoring duplicates!
 class CompressedSNPCalls:
-    def __init__(self, remove_duplicates=True, start_snps_size=1000):
+    def __init__(self, start_snps_size=1000):
         # important. This does NOT remove duplicates
         self.mindex2cb_ub_p_group_misaligned = []
         self.n_snps = 0
@@ -217,7 +217,7 @@ def count_call_variants_for_chromosome(
         cellbarcode_compressor,
         compute_p_read_misaligned,
         discard_read,
-):
+) -> CompressedSNPCalls:
     prev_segment = None
     # cbub2qual_and_snps = {}
     compressed_snp_calls = CompressedSNPCalls()

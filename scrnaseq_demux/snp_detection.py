@@ -1,11 +1,13 @@
 from . import cellranger_specific
 from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
-from .snp_counter import count_call_variants_for_chromosome, count_snps
+from .snp_counter import count_call_variants_for_chromosome, count_snps, CompressedSNPCalls
 import pysam
 from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
 from collections import defaultdict, Counter
+
+from .utils import decompress_base
 
 
 def detect_snps_for_chromosome(
@@ -45,8 +47,8 @@ def detect_snps_for_chromosome(
             candidate_positions = np.sort(candidate_positions)
 
     # stage2. collect detailed counts about snp candidates
-    # TODO optimization - minimize amount of barcodes here to those have donor associated?
-    cbub2qual_and_snps = count_call_variants_for_chromosome(
+    # TODO optimization - minimize amount of barcodes passed here to those have donor associated?
+    compressed_snp_calls = count_call_variants_for_chromosome(
         bamfile_path,
         chromosome=chromosome,
         chromosome_snps_zero_based=candidate_positions,
@@ -57,7 +59,7 @@ def detect_snps_for_chromosome(
     donor2dindex = {donor: dindex for dindex, donor in enumerate(sorted_donors)}
 
     position2donor2base2count = _count_snp_stats_for_donors(
-        cbub2qual_and_snps, barcode_handler, barcode2donor, donor2dindex)
+        compressed_snp_calls, barcode_handler, barcode2donor, donor2dindex)
 
     # which positions are best?
     def importance_and_base_counts(counts):
@@ -87,18 +89,18 @@ def detect_snps_for_chromosome(
     ]
 
 
-def _count_snp_stats_for_donors(cbub2qual_and_snps, barcode_handler,
+def _count_snp_stats_for_donors(compressed_snp_calls: CompressedSNPCalls, barcode_handler,
                                 barcode2donor, donor2dindex,
                                 max_contribution_to_base_count_from_barcode=3.):
     # computes bases at position for each donor given guesses for different barcodes
     # limits contribution
+    calls = compressed_snp_calls.sindex2snp_call
     barcode_snp2counts = Counter()
-    for (cb_compressed, ub), (_, snps) in cbub2qual_and_snps.items():
+    for mindex, reference_position, base_index, base_qual in calls[calls['p_base_wrong'] < 0.01]:
+        cb_compressed, _ub, _p_group_misaligned = compressed_snp_calls.mindex2cb_ub_p_group_misaligned[mindex]
         barcode = barcode_handler.ordered_barcodes[cb_compressed]
-        for reference_position, base, p_base_wrong in snps:
-            # ignores too bad positions
-            if p_base_wrong < 0.01:
-                barcode_snp2counts[barcode, reference_position, base] += 1
+        barcode_snp2counts[barcode, reference_position, decompress_base(base_index)] += 1
+
     position2donor2base2count = defaultdict(lambda: np.zeros([len(donor2dindex), 4], dtype='int32'))
 
     for (barcode, reference_position, base), count in barcode_snp2counts.items():
