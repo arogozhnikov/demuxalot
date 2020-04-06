@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Tuple, Dict
 
 import joblib
@@ -12,8 +13,8 @@ class ChromosomeSNPLookup:
     def __init__(self, positions: np.ndarray):
         """
         Allows fast checking of intersection with SNPs, a bit memory-inefficient, but quite fast.
-        Important note is that information from only one chromosome can be stored, so only positions are stored.
-        :param positions: zero-based (!) positions of SNPs on chromosomes
+        Important note is that information from only one chromosome can be stored, so only positions are kept.
+        :param positions: zero-based (!) positions of SNPs on chromosomes. Aligns with pysam enumeration
         """
         assert isinstance(positions, np.ndarray)
         assert np.array_equal(positions, np.sort(positions))
@@ -70,9 +71,9 @@ def compress_cbub_reads_group_to_snips(
         snp_lookup: ChromosomeSNPLookup,
         compute_p_read_misaligned,
         skip_complete_duplicates=True,
-) -> Tuple[float, dict]:
+) -> Tuple[float, list]:
     """
-    Take a group of reads and leaves only information about SNP positions
+    Takes a group of reads and leaves only information about SNP positions
     """
     p_group_misaligned = 1
     processed_positions = set()
@@ -90,7 +91,30 @@ def compress_cbub_reads_group_to_snips(
         for reference_position, base, base_qual in snp_lookup.get_snps(read):
             SNPs.setdefault(reference_position, []).append((base, base_qual, p_read_misaligned))
 
-    return p_group_misaligned, SNPs
+    compressed_snps = []  # (position, base, p_wrong)
+    for snp_position, bases_probs in SNPs.items():
+        base2p_wrong = defaultdict(lambda: 1)
+        for base, base_qual, _p_read_misaligned in bases_probs:
+            base2p_wrong[base] *= 0.1 ** (0.1 * min(base_qual, 40))
+
+        if len(base2p_wrong) > 1:
+            # molecule should have only one candidate, this this is artifact
+            # of reverse transcription or amplification or sequencing
+            best_prob = min(base2p_wrong.values())
+            # drop poorly sequenced candidate(s), this resolves some obvious conflicts
+            base2p_wrong = {
+                base: p_wrong
+                for base, p_wrong in base2p_wrong.items()
+                if p_wrong * 0.01 <= best_prob or p_wrong < 0.001
+            }
+
+        # if #candidates is still not one, discard this sample
+        if len(base2p_wrong) != 1:
+            continue
+        (base, p_wrong), = base2p_wrong.items()
+        compressed_snps.append((snp_position, base, p_wrong))
+
+    return p_group_misaligned, compressed_snps
 
 
 def compress_old_cbub_groups(

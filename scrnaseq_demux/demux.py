@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import List, Union
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -15,9 +15,9 @@ class ProbabilisticGenotypes:
         Can aggregate information from GSA, our prior guesses and genotype information learnt from RNAseq.
         Genotype names can't be changed once object is created.
         Class doesn't handle more than one SNP at position (examples are A/T and A/C at the same position),
-        so we keep the first SNP for position.
+        so only the first received SNP for position is kept.
         Genotype information is always accumulated, not overwritten.
-        Information is stored as betas.
+        Information is stored as betas (akin to coefficients in beta distribution).
         """
         self.snips = {}
         self.genotype_names = list(genotype_names)
@@ -68,6 +68,11 @@ class ProbabilisticGenotypes:
                 print("completed snps: ", len(self.snips))
 
     def add_prior_betas(self, prior_filename, *, prior_strength):
+        """
+        Betas is the way Demultiplexer stores learnt genotypes. It's csv file with posterior weights.
+        :param prior_filename: path to file
+        :param prior_strength: float, controls impact of learnt genotypes.
+        """
         prior_knowledge = pd.read_csv(prior_filename, sep='\t')
         tech_columns = ['CHROM', 'POS', 'BASE', 'DEFAULT_PRIOR']
         for column in tech_columns:
@@ -103,10 +108,6 @@ class ProbabilisticGenotypes:
             else:
                 self.snips[chromosome, position] = (bases[0], bases[1], snp_priors)
 
-    def get_positions_for_chromosome(self, chromosome_name: str):
-        positions = [pos for chromosome, pos in self.snips if chromosome == chromosome_name]
-        return np.unique(np.asarray(positions, dtype=int))
-
     def get_chromosome2positions(self):
         chromosome2positions = defaultdict(list)
         for chromosome, position in self.snips:
@@ -134,6 +135,9 @@ class ProbabilisticGenotypes:
             genotype_snp_beta_prior[sindex] = priors
 
         return snp2sindex, snp2ref_alt, genotype_snp_beta_prior
+
+    def contains_snp(self, chromosome, position):
+        return (chromosome, position) in self.snips
 
     def save_betas(self, path_or_buf, *, external_betas: np.ndarray = None):
         if external_betas is not None:
@@ -177,7 +181,8 @@ class Demultiplexer:
       - hard to limit contribution of a single SNP (this was deciding after all)
     - second is to compute contributions of SNPs
       - limiting contribution from a single cb+ub is hard, but it is limited by group size and
-        number of possible modifications (AS limit)
+        number of possible modifications (AS limit in terms of cellranger/STAR alignment)
+    Second one is used here.
     """
 
     @staticmethod
@@ -188,36 +193,13 @@ class Demultiplexer:
         mindex2bindex = []
         for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
             for (bindex, _ub), (_p_group_misaligned, snps) in cbub2qual_and_snps.items():
-                if snps is None:
-                    # we skip group without SNPs
-                    continue
                 molecule_index = len(mindex2bindex)
                 mindex2bindex.append(bindex)
-                for snp_position, bases_probs in snps.items():
-                    base2p_wrong = defaultdict(lambda: 1)
-                    for base, base_qual, _p_read_misaligned in bases_probs:
-                        base2p_wrong[base] *= 0.1 ** (0.1 * min(base_qual, 40))
-
-                    if len(base2p_wrong) > 1:
-                        # molecule should have only one candidate, this this is artifact
-                        # of reverse transcription or amplification or sequencing
-                        best_prob = min(base2p_wrong.values())
-                        # drop poorly sequenced candidate(s), this resolves some obvious conflicts
-                        base2p_wrong = {
-                            base: p_wrong
-                            for base, p_wrong in base2p_wrong.items()
-                            if p_wrong * 0.01 <= best_prob or p_wrong < 0.001
-                        }
-
-                    # if #candidates is still not one, discard this sample
-                    if len(base2p_wrong) != 1:
-                        continue
-
+                for snp_position, base, p_base_wrong in snps:
                     # only handle situations with either ref or alt. skip otherwise
                     ref, alt = snp2ref_alt[chromosome, snp_position]
-                    if (ref in base2p_wrong) + (alt in base2p_wrong) == 1:
-                        is_alt = alt in base2p_wrong
-                        p_base_wrong = base2p_wrong[alt] if is_alt else base2p_wrong[ref]
+                    if base in (ref, alt):
+                        is_alt = base == alt
                         snp = (
                             molecule_index,
                             snp2sindex[chromosome, snp_position],
@@ -294,6 +276,10 @@ class Demultiplexer:
         )
         snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = Demultiplexer.compress_snp_calls(mindex2bindex, snps)
         genotype_snp_posterior = genotype_snp_beta_prior.copy()
+        assert np.all(snp_p_wrong >= 0)
+        assert np.all(snp_p_wrong <= 1)
+        assert np.all(genotype_snp_posterior > 0), 'bad loaded genotypes as negative coefficients appeared'
+
         return genotype_snp_posterior, snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices
 
     @staticmethod
@@ -311,6 +297,7 @@ class Demultiplexer:
 
         genotype_prob = genotype_snp_posterior / genotype_snp_posterior.sum(axis=-1, keepdims=True)
         genotype_prob = genotype_prob.clip(p_genotype_clip, 1 - p_genotype_clip)
+        assert np.isfinite(genotype_prob).all()
 
         n_genotypes = len(genotype2gindex)
         if only_singlets:
