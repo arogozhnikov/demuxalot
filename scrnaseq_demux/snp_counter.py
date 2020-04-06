@@ -95,7 +95,7 @@ class CompressedSNPCalls:
             self.n_snps += 1
 
     def minimize_memory_footprint(self):
-        self.sindex2snp_call = self.sindex2snp_call[:self.n_snps]
+        self.sindex2snp_call = self.sindex2snp_call[:self.n_snps].copy()
 
     @staticmethod
     def merge(chromosome_snpcalls, chrom_pos2sindex):
@@ -254,6 +254,7 @@ def count_call_variants_for_chromosome(
     compress_old_cbub_groups(
         np.inf, cbub2position_and_reads, compressed_snp_calls, snp_lookup, compute_p_read_misaligned,
     )
+    compressed_snp_calls.minimize_memory_footprint()
     return compressed_snp_calls
 
 
