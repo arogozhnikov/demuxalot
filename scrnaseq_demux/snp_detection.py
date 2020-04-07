@@ -68,8 +68,8 @@ def detect_snps_for_chromosome(
         # leaving two most important bases
         left_bases = alt, ref = np.argsort(counts.sum(axis=0))[-2:]
         base_counts = {
-            'ACGT'[alt]: counts[:, alt].sum(),
             'ACGT'[ref]: counts[:, ref].sum(),
+            'ACGT'[alt]: counts[:, alt].sum(),
         }
 
         counts = counts[:, left_bases] + 1e-4
@@ -95,10 +95,10 @@ def _count_snp_stats_for_donors(compressed_snp_calls: CompressedSNPCalls, barcod
                                 max_contribution_to_base_count_from_barcode=3.):
     # computes bases at position for each donor given guesses for different barcodes
     # limits contribution
-    calls = compressed_snp_calls.sindex2snp_call
+    calls = compressed_snp_calls.snp_calls
     barcode_snp2counts = Counter()
     for mindex, reference_position, base_index, base_qual in calls[calls['p_base_wrong'] < 0.01]:
-        cb_compressed, _ub, _p_group_misaligned = compressed_snp_calls.mindex2cb_ub_p_group_misaligned[mindex]
+        cb_compressed, _ub, _p_group_misaligned = compressed_snp_calls.molecules[mindex]
         barcode = barcode_handler.ordered_barcodes[cb_compressed]
         barcode_snp2counts[barcode, reference_position, decompress_base(base_index)] += 1
 
@@ -160,7 +160,7 @@ def detect_snps_positions(
 
     sorted_donors = np.unique([donor for donor in barcode2donor.values()])
 
-    with Parallel(n_jobs=joblib_n_jobs) as parallel:
+    with Parallel(n_jobs=joblib_n_jobs, verbose=11) as parallel:
         chrom_pos_importances_collection = parallel(
             delayed(detect_snps_for_chromosome)(
                 bamfile_location,
@@ -213,4 +213,8 @@ def _export_snps_to_beta(selected_snps, prior_filename):
             df['BASE'].append(base)
             df['DEFAULT_PRIOR'].append(base_count)
 
-    pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
+    # normalize counts at each position so priors sum up to unity
+    df = pd.DataFrame(df)
+    df['DEFAULT_PRIOR'] = df.groupby(['CHROM', 'POS'])['DEFAULT_PRIOR'].transform(
+        lambda x: x.clip(1e-4) / x.clip(1e-4).sum())
+    df.to_csv(prior_filename, sep='\t', index=False)
