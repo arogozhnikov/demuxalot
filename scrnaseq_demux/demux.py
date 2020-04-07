@@ -210,7 +210,7 @@ class Demultiplexer:
         return mindex2bindex, preprocessed_snps
 
     @staticmethod
-    def staged_genotype_learning(chromosome2cbub2qual_and_snps,
+    def staged_genotype_learning(chromosome2compressed_snp_calls,
                                  genotypes: ProbabilisticGenotypes,
                                  barcode_handler: BarcodeHandler,
                                  n_iterations=5,
@@ -218,7 +218,7 @@ class Demultiplexer:
                                  p_genotype_clip=0.01,
                                  save_learnt_genotypes_to=None):
         genotype_snp_prior, snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = \
-            Demultiplexer.compute_compressed_snps(chromosome2cbub2qual_and_snps, genotypes)
+            Demultiplexer.compute_compressed_snps(chromosome2compressed_snp_calls, genotypes)
 
         n_barcodes = len(barcode_handler.barcode2index)
         n_genotypes = len(genotypes.genotype_names)
@@ -268,23 +268,22 @@ class Demultiplexer:
         return snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices
 
     @staticmethod
-    def compute_compressed_snps(chromosome2cbub2qual_and_snps, genotypes):
+    def compute_compressed_snps(chromosome2compressed_snp_calls, genotypes):
         snp2sindex, snp2ref_alt, genotype_snp_beta_prior = genotypes.generate_genotype_snp_beta_prior()
         mindex2bindex, snps = Demultiplexer.preprocess_snp_calls(
-            chromosome2cbub2qual_and_snps,
-            snp2ref_alt=snp2ref_alt, snp2sindex=snp2sindex
+            chromosome2compressed_snp_calls, snp2ref_alt=snp2ref_alt, snp2sindex=snp2sindex
         )
         snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = Demultiplexer.compress_snp_calls(mindex2bindex, snps)
         genotype_snp_posterior = genotype_snp_beta_prior.copy()
         assert np.all(snp_p_wrong >= 0)
         assert np.all(snp_p_wrong <= 1)
-        assert np.all(genotype_snp_posterior > 0), 'bad loaded genotypes as negative coefficients appeared'
+        assert np.all(genotype_snp_posterior > 0), 'bad loaded genotypes, negative betas appeared'
 
         return genotype_snp_posterior, snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices
 
     @staticmethod
     def predict_posteriors(
-            chromosome2cbub2qual_and_snps,
+            chromosome2compressed_snp_calls,
             genotypes: ProbabilisticGenotypes,
             barcode_handler: BarcodeHandler,
             only_singlets: bool,
@@ -292,7 +291,7 @@ class Demultiplexer:
             doublet_prior=0.35,
     ):
         genotype_snp_posterior, snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices = \
-            Demultiplexer.compute_compressed_snps(chromosome2cbub2qual_and_snps, genotypes)
+            Demultiplexer.compute_compressed_snps(chromosome2compressed_snp_calls, genotypes)
         genotype2gindex = {genotype: gindex for gindex, genotype in enumerate(genotypes.genotype_names)}
 
         genotype_prob = genotype_snp_posterior / genotype_snp_posterior.sum(axis=-1, keepdims=True)

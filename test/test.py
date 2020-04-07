@@ -50,7 +50,7 @@ class TestClass(unittest.TestCase):
             self.prior_filename = self.prepare_prior_file(genotypes_used)
             genotypes_used.add_prior_betas(self.prior_filename, prior_strength=10)
         self.genotypes_used = genotypes_used
-        self.chromosome2cbub2qual_and_snps = self.count_snps()
+        self.chromosome2snp_calls = self.count_snps()
 
     def prepare_prior_file(self, genotypes_used):
         chrom2snp_positions_and_stats = joblib.load(
@@ -111,7 +111,7 @@ class TestClass(unittest.TestCase):
         self.check_genotypes_are_identical(self.genotypes_used, genotypes_reverse)
 
         kwargs = dict(
-            chromosome2cbub2qual_and_snps=self.chromosome2cbub2qual_and_snps,
+            chromosome2compressed_snp_calls=self.chromosome2snp_calls,
             barcode_handler=self.barcode_handler,
             only_singlets=True,
         )
@@ -123,57 +123,62 @@ class TestClass(unittest.TestCase):
 
     def count_snps(self):
         with Timer('new_snp_counting'):
-            chromosome2cbub2qual_and_snps = count_snps(
+            chromosome2compressed_snp_calls = count_snps(
                 bamfile_location=self.bamfile_location,
                 chromosome2positions=self.genotypes_used.get_chromosome2positions(),
                 barcode_handler=self.barcode_handler,
             )
-        # TODO delete
-        import pickle
-        print(len(pickle.dumps(chromosome2cbub2qual_and_snps, protocol=-1)))
 
-        #     counter = {
-        #         chromosome: len(cals) for chromosome, cals in chromosome2cbub2qual_and_snps.items()
-        #     }
-        #     pprint.pprint(counter)
-        #
-        # assert counter == {
-        #     'GRCh38_______1': 3916,
-        #     'GRCh38_______10': 765,
-        #     'GRCh38_______11': 7682,
-        #     'GRCh38_______12': 1393,
-        #     'GRCh38_______13': 376,
-        #     'GRCh38_______14': 851,
-        #     'GRCh38_______15': 1261,
-        #     'GRCh38_______16': 1882,
-        #     'GRCh38_______17': 2837,
-        #     'GRCh38_______18': 124,
-        #     'GRCh38_______19': 5428,
-        #     'GRCh38_______2': 2166,
-        #     'GRCh38_______20': 1376,
-        #     'GRCh38_______21': 95,
-        #     'GRCh38_______22': 1763,
-        #     'GRCh38_______3': 2926,
-        #     'GRCh38_______4': 1011,
-        #     'GRCh38_______5': 739,
-        #     'GRCh38_______6': 2122,
-        #     'GRCh38_______7': 2306,
-        #     'GRCh38_______8': 2201,
-        #     'GRCh38_______9': 852,
-        #     'GRCh38_______MT': 24861,
-        #     'GRCh38_______X': 384
-        # }
-        #
-        # for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
-        #     print(chromosome, len(cbub2qual_and_snps))
-        for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
-            print(chromosome, len(cbub2qual_and_snps.mindex2cb_ub_p_group_misaligned))
-        return chromosome2cbub2qual_and_snps
+        counter = {
+            chromosome: calls.n_molecules
+            for chromosome, calls in chromosome2compressed_snp_calls.items()
+        }
+
+        for chromosome, calls in chromosome2compressed_snp_calls.items():
+            assert len(calls.molecules) == calls.n_molecules
+
+        pprint.pprint(counter)
+
+        import pickle
+        print('size1',
+              len(pickle.dumps([calls.molecules for chromosome, calls in chromosome2compressed_snp_calls.items()])))
+        print('size2',
+              len(pickle.dumps([calls.snp_calls for chromosome, calls in chromosome2compressed_snp_calls.items()])))
+        print('total size', len(pickle.dumps(chromosome2compressed_snp_calls)))
+
+        assert counter == {
+            'GRCh38_______1': 3918,
+            'GRCh38_______10': 765,
+            'GRCh38_______11': 7688,
+            'GRCh38_______12': 1393,
+            'GRCh38_______13': 376,
+            'GRCh38_______14': 858,
+            'GRCh38_______15': 1261,
+            'GRCh38_______16': 1882,
+            'GRCh38_______17': 2838,
+            'GRCh38_______18': 124,
+            'GRCh38_______19': 5428,
+            'GRCh38_______2': 2171,
+            'GRCh38_______20': 1377,
+            'GRCh38_______21': 95,
+            'GRCh38_______22': 1764,
+            'GRCh38_______3': 2945,
+            'GRCh38_______4': 1011,
+            'GRCh38_______5': 739,
+            'GRCh38_______6': 2122,
+            'GRCh38_______7': 2306,
+            'GRCh38_______8': 2201,
+            'GRCh38_______9': 853,
+            'GRCh38_______MT': 24873,
+            'GRCh38_______X': 384,
+        }
+
+        return chromosome2compressed_snp_calls
 
     def test_demultiplexing_singlets_vs_doublets(self):
         with Timer('checking alignments of singlets and doublets'):
             kwargs = dict(
-                chromosome2cbub2qual_and_snps=self.chromosome2cbub2qual_and_snps,
+                chromosome2compressed_snp_calls=self.chromosome2snp_calls,
                 genotypes=self.genotypes_used,
                 barcode_handler=self.barcode_handler,
             )
@@ -186,7 +191,7 @@ class TestClass(unittest.TestCase):
     def test_demultiplexing_agaisnt_historical_result(self):
         with Timer('demultiplexing'):
             for barcode_posterior_probs_df, debug_info in Demultiplexer.staged_genotype_learning(
-                    chromosome2cbub2qual_and_snps=self.chromosome2cbub2qual_and_snps,
+                    chromosome2compressed_snp_calls=self.chromosome2snp_calls,
                     genotypes=self.genotypes_used,
                     barcode_handler=self.barcode_handler,
                     n_iterations=3):
@@ -204,7 +209,7 @@ class TestClass(unittest.TestCase):
         with Timer('demultiplexing again and exporting difference'):
             learnt_genotypes_filename = here / '_learnt_beta_contributions.csv'
             for _, debug_info2 in Demultiplexer.staged_genotype_learning(
-                    chromosome2cbub2qual_and_snps=self.chromosome2cbub2qual_and_snps,
+                    chromosome2compressed_snp_calls=self.chromosome2snp_calls,
                     genotypes=self.genotypes_used,
                     barcode_handler=self.barcode_handler,
                     n_iterations=3,
@@ -223,7 +228,7 @@ class TestClass(unittest.TestCase):
                    self.genotypes_used.generate_genotype_snp_beta_prior()[:2]
 
             logits2, _ = Demultiplexer.predict_posteriors(
-                chromosome2cbub2qual_and_snps=self.chromosome2cbub2qual_and_snps,
+                chromosome2compressed_snp_calls=self.chromosome2snp_calls,
                 genotypes=genotypes_learnt,
                 barcode_handler=self.barcode_handler,
                 only_singlets=True)

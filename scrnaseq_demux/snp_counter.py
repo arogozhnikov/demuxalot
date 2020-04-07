@@ -40,6 +40,7 @@ class ChromosomeSNPLookup:
         seq = read.seq
         qual = read.query_qualities
 
+        # aligned pair of positions in read and in reference
         read_position = 0
         refe_position = read.pos
 
@@ -47,9 +48,7 @@ class ChromosomeSNPLookup:
             if code in [0, 7, 8]:
                 # coincides or does not coincide
                 if self.snips_exist(refe_position, refe_position + l):
-                    lo = np.searchsorted(self.positions, refe_position)
-                    hi = np.searchsorted(self.positions, refe_position + l)
-                    assert hi != lo
+                    lo, hi = np.searchsorted(self.positions, [refe_position, refe_position + l])
                     for ref_position in self.positions[lo:hi]:
                         position_in_read = read_position + (ref_position - refe_position)
                         snps.append((ref_position, seq[position_in_read], qual[position_in_read]))
@@ -67,59 +66,68 @@ class ChromosomeSNPLookup:
 
 
 def double_array(array):
+    # double array size while keeping original information and preserve dtype
     return np.concatenate([array, array], axis=0)
 
 
 # TODO not ignoring duplicates!
 class CompressedSNPCalls:
-    def __init__(self, start_snps_size=1000):
+    def __init__(self, start_snps_size=1024, start_molecule_size=128):
         # important. This does NOT remove duplicates
-        self.mindex2cb_ub_p_group_misaligned = []
-        self.n_snps = 0
+        self.n_molecules = 0
+        self.molecules = np.array(
+            [(-1, -1, -1.)] * start_molecule_size,
+            dtype=[('compressed_cb', 'int32'), ('compressed_ub', 'int32'), ('p_group_misaligned', 'float32')]
+        )
 
-        self.sindex2snp_call = np.array(
+        self.n_snp_calls = 0
+        self.snp_calls = np.array(
             [(-1, -1, 255, -1.)] * start_snps_size,
             dtype=[('molecule_index', 'int32'), ('snp_position', 'int32'), ('base_index', 'uint8'),
                    ('p_base_wrong', 'float32')]
         )
 
     def add_group_snps(self, compressed_cb, compressed_ub, p_group_misaligned, snps):
-        if len(snps) + self.n_snps > len(self.sindex2snp_call):
-            # double array size while keeping original size
-            self.sindex2snp_call = np.concatenate([self.sindex2snp_call, self.sindex2snp_call], axis=0)
-        molecule_index = len(self.mindex2cb_ub_p_group_misaligned)
-        self.mindex2cb_ub_p_group_misaligned.append((compressed_cb, compressed_ub, p_group_misaligned))
+        if len(snps) + self.n_snp_calls > len(self.snp_calls):
+            self.snp_calls = double_array(self.snp_calls)
+        if self.n_molecules == len(self.molecules):
+            self.molecules = double_array(self.molecules)
+
+        molecule_index = self.n_molecules
+        self.molecules[molecule_index] = (compressed_cb, compressed_ub, p_group_misaligned)
+        self.n_molecules += 1
 
         for reference_position, base, p_base_wrong in snps:
-            self.sindex2snp_call[self.n_snps] = (molecule_index, reference_position, compress_base(base), p_base_wrong)
-            self.n_snps += 1
+            self.snp_calls[self.n_snp_calls] = (molecule_index, reference_position, compress_base(base), p_base_wrong)
+            self.n_snp_calls += 1
 
     def minimize_memory_footprint(self):
-        self.sindex2snp_call = self.sindex2snp_call[:self.n_snps].copy()
+        self.snp_calls = self.snp_calls[:self.n_snp_calls].copy()
+        self.molecules = self.molecules[:self.n_molecules].copy()
 
     @staticmethod
-    def merge(chromosome_snpcalls, chrom_pos2sindex):
+    def merge(chromosome_snpcalls: List[Tuple[str, 'CompressedSNPCalls']],
+              chrom_pos2sindex):
         for chromosome, snp_calls in chromosome_snpcalls:
             assert isinstance(snp_calls, CompressedSNPCalls)
 
         merged_snps = np.array(
-            [(-1, -1, 255, -1.)] * sum(x.n_snps for _, x in chromosome_snpcalls),
+            [(-1, -1, 255, -1.)] * sum(x.n_snp_calls for _, x in chromosome_snpcalls),
             dtype=[('mindex', 'int32'), ('sindex', 'int32'), ('base_index', 'uint8'), ('p_base_wrong', 'float32')]
         )
         mindex2bindex = []
         fragment_start = 0
         for chromosome, snp_calls in chromosome_snpcalls:
-            fragment_end = fragment_start + snp_calls.n_snps
+            fragment_end = fragment_start + snp_calls.n_snp_calls
             fragment = merged_snps[fragment_start:fragment_end]
-            source = snp_calls.sindex2snp_call[:snp_calls.n_snps]
+            source = snp_calls.snp_calls[:snp_calls.n_snp_calls]
             fragment['mindex'] = source['molecule_index'] + len(mindex2bindex)
             fragment['sindex'] = [chrom_pos2sindex[chromosome, pos] for pos in source['snp_position']]
             fragment['base_index'] = source['base_index']
             fragment['p_base_wrong'] = source['p_base_wrong']
-            mindex2bindex.extend([cb for cb, ub, p_group_misaligned in snp_calls.mindex2cb_ub_p_group_misaligned])
+            mindex2bindex.extend(snp_calls.molecules['compressed_cb'][:snp_calls.n_molecules])
             fragment_start = fragment_end
 
-        assert fragment_end == len(merged_snps)
         return mindex2bindex, merged_snps
 
 
@@ -155,14 +163,14 @@ def compress_cbub_reads_group_to_snips(
             base2p_wrong[base] *= 0.1 ** (0.1 * min(base_qual, 40))
 
         if len(base2p_wrong) > 1:
-            # molecule should have only one candidate, this this is artifact
+            # molecule should have only one candidate, this is an artifact
             # of reverse transcription or amplification or sequencing
             best_prob = min(base2p_wrong.values())
             # drop poorly sequenced candidate(s), this resolves some obvious conflicts
             base2p_wrong = {
                 base: p_wrong
                 for base, p_wrong in base2p_wrong.items()
-                if p_wrong * 0.01 <= best_prob or p_wrong < 0.001
+                if p_wrong * 0.01 <= best_prob or p_wrong < min(0.001, 1e8 * best_prob)
             }
 
         # if #candidates is still not one, discard this sample
@@ -177,14 +185,13 @@ def compress_cbub_reads_group_to_snips(
 def compress_old_cbub_groups(
         threshold_position: int,
         cbub2position_and_reads,
-        # cbub2qual_and_snps,
         compressed_snp_calls,
         snp_lookup: ChromosomeSNPLookup,
         compute_p_read_misaligned,
 ):
     """
-    Compresses groups of reads that already left region of our consideration. We keep snp list instead of reads.
-    Compressed groups are removed from cbub2position_and_reads, compressed version written to cbub2qual_and_snps
+    Compresses groups of reads that already left region of our consideration.
+    Compressed groups are removed from cbub2position_and_reads and only snps are kept in composed_snp_calls.
     """
     to_remove = []
     for cbub, (position, reads) in cbub2position_and_reads.items():
@@ -203,8 +210,6 @@ def compress_old_cbub_groups(
                 continue
             # keep only one alignment group per cbub while treating others as misalignment
             compressed_snp_calls.add_group_snps(cbub[0], cbub[1], p_group_misaligned, snips)
-            # if (cbub not in cbub2qual_and_snps) or (cbub2qual_and_snps[cbub][0] > p_group_misaligned):
-            #     cbub2qual_and_snps[cbub] = p_group_misaligned, snips
 
     for cbub in to_remove:
         cbub2position_and_reads.pop(cbub)
@@ -219,7 +224,6 @@ def count_call_variants_for_chromosome(
         discard_read,
 ) -> CompressedSNPCalls:
     prev_segment = None
-    # cbub2qual_and_snps = {}
     compressed_snp_calls = CompressedSNPCalls()
     cbub2position_and_reads = {}
     snp_lookup = ChromosomeSNPLookup(chromosome_snps_zero_based)
