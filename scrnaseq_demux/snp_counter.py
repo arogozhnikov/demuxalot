@@ -13,7 +13,7 @@ class ChromosomeSNPLookup:
     def __init__(self, positions: np.ndarray):
         """
         Allows fast checking of intersection with SNPs, a bit memory-inefficient, but quite fast.
-        Important note is that information from only one chromosome can be stored, so only positions are kept.
+        Information from only one chromosome can be stored, so only positions are kept.
         :param positions: zero-based (!) positions of SNPs on chromosomes. Aligns with pysam enumeration
         """
         assert isinstance(positions, np.ndarray)
@@ -104,6 +104,8 @@ class CompressedSNPCalls:
     def minimize_memory_footprint(self):
         self.snp_calls = self.snp_calls[:self.n_snp_calls].copy()
         self.molecules = self.molecules[:self.n_molecules].copy()
+        assert np.all(self.molecules['p_group_misaligned'] != -1)
+        assert np.all(self.snp_calls['p_base_wrong'] != -1)
 
     @staticmethod
     def merge(chromosome_snpcalls: List[Tuple[str, 'CompressedSNPCalls']],
@@ -294,7 +296,7 @@ def count_snps(
         chromosome2nreads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
 
         def chromosome_order(chromosome, positions):
-            # simple estimate for number of SNP calls
+            # simple estimate for number of SNP calls under 'even distribution' assumption
             return -chromosome2nreads[chromosome] * len(positions) / f.get_reference_length(chromosome)
 
         chromosome2positions = list(sorted(chromosome2positions, key=lambda chr_pos: chromosome_order(*chr_pos)))

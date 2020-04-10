@@ -8,9 +8,9 @@ from joblib import Parallel, delayed
 from . import cellranger_specific
 from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
 from .snp_counter import count_call_variants_for_chromosome, count_snps, CompressedSNPCalls
-from .utils import decompress_base
 
 
+# possible optimization - this can process a fragment of chromosome
 def detect_snps_for_chromosome(
         bamfile_path,
         chromosome,
@@ -20,9 +20,10 @@ def detect_snps_for_chromosome(
         barcode_handler: BarcodeHandler,
         regularization: float,
         minimum_coverage: int,
-        minimum_alternative_fraction: float = 0.01,
-        minimum_alternative_coverage: int = 100,
+        minimum_alternative_fraction: float,
+        minimum_alternative_coverage: int,
         max_snp_candidates: int = 10000,
+        minimum_fraction_of_ref_and_alt=0.98,
 ):
     # stage1. straightforward counting, to detect possible candidates for snp
     with pysam.AlignmentFile(bamfile_path) as bamfile:
@@ -35,20 +36,19 @@ def detect_snps_for_chromosome(
         *_, alt, ref = np.sort(coverage, axis=0)
         is_candidate = (ref + alt) > minimum_coverage
         # prefer snps with only two alternatives
-        is_candidate &= (ref + alt) > 0.98 * total
+        is_candidate &= (ref + alt) > minimum_fraction_of_ref_and_alt * total
         is_candidate &= alt > minimum_alternative_coverage
         is_candidate &= alt > ref * minimum_alternative_fraction
 
         candidate_positions = np.where(is_candidate)[0]
 
         if len(candidate_positions) > max_snp_candidates:
-            # TODO warn here?
             # if too many candidates (improbable), take ones with highest alternative count
             candidate_positions = np.argsort(alt * is_candidate)[-max_snp_candidates:]
             candidate_positions = np.sort(candidate_positions)
 
     # stage2. collect detailed counts about snp candidates
-    # TODO optimization - minimize amount of barcodes passed here to those have donor associated?
+    # possible optimization - minimize amount of barcodes passed here to those have donor associated
     compressed_snp_calls = count_call_variants_for_chromosome(
         bamfile_path,
         chromosome=chromosome,
@@ -95,21 +95,21 @@ def _count_snp_stats_for_donors(compressed_snp_calls: CompressedSNPCalls, barcod
                                 max_contribution_to_base_count_from_barcode=3.):
     # computes bases at position for each donor given guesses for different barcodes
     # limits contribution
-    calls = compressed_snp_calls.snp_calls
+    calls = compressed_snp_calls.snp_calls[:compressed_snp_calls.n_snp_calls]
     barcode_snp2counts = Counter()
     for mindex, reference_position, base_index, base_qual in calls[calls['p_base_wrong'] < 0.01]:
         cb_compressed, _ub, _p_group_misaligned = compressed_snp_calls.molecules[mindex]
         barcode = barcode_handler.ordered_barcodes[cb_compressed]
-        barcode_snp2counts[barcode, reference_position, decompress_base(base_index)] += 1
+        barcode_snp2counts[barcode, reference_position, base_index] += 1
 
     position2donor2base2count = defaultdict(lambda: np.zeros([len(donor2dindex), 4], dtype='int32'))
 
-    for (barcode, reference_position, base), count in barcode_snp2counts.items():
+    for (barcode, reference_position, base_index), count in barcode_snp2counts.items():
         donor = barcode2donor.get(barcode, None)
         if donor is None:
             continue
         contribution = min(max_contribution_to_base_count_from_barcode, count)
-        position2donor2base2count[reference_position][donor2dindex[donor], 'ACGT'.index(base)] += contribution
+        position2donor2base2count[reference_position][donor2dindex[donor], base_index] += contribution
     return position2donor2base2count
 
 
@@ -179,11 +179,12 @@ def detect_snps_positions(
     chrom_pos_importances = sum(chrom_pos_importances_collection, [])
     selected_snps = _select_top_snps(chrom_pos_importances, n_additional_best_snps, n_best_snps_per_donor)
     # looks like it should spit out vcf file or beta coefficients. Probably beta coefficients.
+    snp_positions = genotypes.get_snp_positions_set()
     if ignore_known_snps:
         selected_snps = [
             (chrom, pos, importance, base_count)
             for chrom, pos, importance, base_count in selected_snps
-            if not genotypes.contains_snp(chrom, pos)
+            if (chrom, pos) not in snp_positions
         ]
 
     if result_beta_prior_filename is not None:
