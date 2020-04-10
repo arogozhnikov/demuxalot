@@ -11,7 +11,6 @@ import time
 from scipy.special import softmax
 
 from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
-from scrnaseq_demux.demux import ProbabilisticGenotypes_old
 
 here = Path(__file__).parent
 
@@ -82,16 +81,16 @@ class TestClass(unittest.TestCase):
         print(f'Added {len(df["CHROM"]) // 2} new snps in total')
         return prior_filename
 
-    def check_genotypes_are_identical(self, genotypes1: ProbabilisticGenotypes, genotypes2: ProbabilisticGenotypes):
+    @staticmethod
+    def check_genotypes_are_identical(genotypes1: ProbabilisticGenotypes, genotypes2: ProbabilisticGenotypes):
         assert len(genotypes1.snp2snpid) == len(genotypes2.snp2snpid)
         assert genotypes1.genotype_names == genotypes2.genotype_names
 
         assert genotypes1.n_variants == genotypes2.n_variants
 
-        snp2sindex1, snp2ref_alt1, _beta_priors1 = genotypes1.generate_genotype_snp_beta_prior()
-        snp2sindex2, snp2ref_alt2, _beta_priors2 = genotypes2.generate_genotype_snp_beta_prior()
+        snp2sindex1, _beta_priors1 = genotypes1._generate_canonical_representation()
+        snp2sindex2, _beta_priors2 = genotypes2._generate_canonical_representation()
         assert snp2sindex1 == snp2sindex2
-        assert snp2ref_alt1 == snp2ref_alt2
         assert np.allclose(_beta_priors1, _beta_priors2)
 
     def test_export_and_load_of_genotypes(self):
@@ -169,27 +168,6 @@ class TestClass(unittest.TestCase):
 
         return chromosome2compressed_snp_calls
 
-    def test_old_vs_new_genotypes(self):
-        genotypes_new = ProbabilisticGenotypes(self.used_genotypes_names)
-        genotypes_new.add_vcf(self.vcf_filename, prior_strength=100)
-
-        genotypes_old = ProbabilisticGenotypes_old(self.used_genotypes_names)
-        genotypes_old.add_vcf(self.vcf_filename, prior_strength=100)
-
-        self.prior_filename = self.prepare_prior_file(genotypes_new)
-
-        for _ in range(2):
-            snp2sindex1, snp2ref_alt1, genotype_snp_beta_prior1 = genotypes_new.generate_genotype_snp_beta_prior()
-            snp2sindex2, snp2ref_alt2, genotype_snp_beta_prior2 = genotypes_old.generate_genotype_snp_beta_prior()
-            assert snp2sindex1 == snp2sindex2
-            assert snp2ref_alt1 == snp2ref_alt2
-            # allows off by one
-            coincided = np.isclose(genotype_snp_beta_prior1, genotype_snp_beta_prior2, atol=1.1, rtol=1e-1) \
-                        | (genotype_snp_beta_prior1 == genotype_snp_beta_prior2)
-            assert np.all(coincided)
-            genotypes_new.add_prior_betas(self.prior_filename, prior_strength=10)
-            genotypes_old.add_prior_betas(self.prior_filename, prior_strength=10)
-
     def test_demultiplexing_singlets_vs_doublets(self):
         with Timer('checking alignments of singlets and doublets'):
             kwargs = dict(
@@ -242,9 +220,9 @@ class TestClass(unittest.TestCase):
             genotypes_learnt = ProbabilisticGenotypes(self.used_genotypes_names)
             genotypes_learnt.add_prior_betas(learnt_genotypes_filename, prior_strength=1.)
 
-            # checking snps are identical
-            assert genotypes_learnt.generate_genotype_snp_beta_prior()[:2] == \
-                   self.genotypes_used.generate_genotype_snp_beta_prior()[:2]
+            # checking snps are identical, but not checking betas
+            assert genotypes_learnt._generate_canonical_representation()[0] == \
+                   self.genotypes_used._generate_canonical_representation()[0]
 
             logits2, _ = Demultiplexer.predict_posteriors(
                 chromosome2compressed_snp_calls=self.chromosome2snp_calls,
