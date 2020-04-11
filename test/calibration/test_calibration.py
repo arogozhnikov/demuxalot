@@ -24,7 +24,7 @@ class TestClass(unittest.TestCase):
             self.vcf_filename = here / 'system1_merged_v5_for_demultiplexing.vcf'
         else:
             with open('/data/rnaseq/composed/lane2guessed_donor.json') as f:
-                self.lane2inferred_genotypes = json.load(f)
+                self.lane2inferred_genotypes = {k.split('_')[-1]: v for k, v in json.load(f).items()}
             self.bamfile_location = str('/data/rnaseq/composed/composed_200_perlane_sorted.bam')
             self.barcode_handler = BarcodeHandler.from_file('/data/rnaseq/composed/composed_barcodes_200.tsv')
             self.vcf_filename = '/data/genetics/system1_merged_v5_for_demultiplexing.vcf'
