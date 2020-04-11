@@ -73,9 +73,11 @@ class TestClass(unittest.TestCase):
             chromosome2compressed_snp_calls.items()
         }
 
-        calls_collection = [('original', chromosome2compressed_snp_calls),
-                            ('non-aggressive', chromosome2compressed_snp_calls_nonaggressive),
-                            ('aggressive', chromosome2compressed_snp_calls_aggressive)]
+        calls_collection = [
+            ('original', chromosome2compressed_snp_calls),
+            # ('non-aggressive', chromosome2compressed_snp_calls_nonaggressive),
+            # ('aggressive', chromosome2compressed_snp_calls_aggressive)
+        ]
         counts = {
             name: {chrom: c.n_snp_calls for chrom, c in calls.items()} for name, calls in calls_collection
         }
@@ -163,7 +165,7 @@ class TestClass(unittest.TestCase):
     ):
         from scrnaseq_demux.demux import fast_np_add_at_1d, softmax
         variant_index2snp_index, variant_index2betas, molecule_calls, barcode_calls = \
-            Demultiplexer.compute_compressed_snps(chromosome2compressed_snp_calls, genotypes)
+            Demultiplexer.pack_snps(chromosome2compressed_snp_calls, genotypes)
 
         calls = compute_calls(molecule_calls, barcode_calls)
 

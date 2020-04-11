@@ -30,7 +30,7 @@ class Timer:
 
 class TestClass(unittest.TestCase):
     def setUp(self):
-        with open(here / 'lane2guessed_donor.json') as f:
+        with open(here / 'calibration/lane2guessed_donor.json') as f:
             lane2inferred_genotypes = json.load(f)
 
         self.bamfile_location = str(here / 'composed_1_perlane_sorted.bam')
@@ -49,37 +49,12 @@ class TestClass(unittest.TestCase):
         with Timer('update genotypes with new SNPs'):
             # extend genotypes with added SNPs
             # saving learnt genotypes to a separate file
-            self.prior_filename = self.prepare_prior_file(genotypes_used)
+            self.prior_filename = here / 'new_snps.csv'
             genotypes_used.add_prior_betas(self.prior_filename, prior_strength=10)
 
         self.genotypes_used = genotypes_used
         self.chromosome2snp_calls = self.count_snps()
 
-    def prepare_prior_file(self, genotypes_used: ProbabilisticGenotypes):
-        chrom2snp_positions_and_stats = joblib.load(
-            here / 'chrom2possible0basedpositions_based_on_donors.joblib.pkl')
-        df = defaultdict(list)
-        for chromosome, (snp_positions, snp_stats) in chrom2snp_positions_and_stats.items():
-            for snp_position, snp_stat in zip(snp_positions, snp_stats):
-                if any((chromosome, snp_position, base) in genotypes_used.snp2snpid for base in 'ACGT'):
-                    continue
-
-                _, _, alt, ref = np.argsort(snp_stat)
-                alt_count, ref_count = snp_stat[alt], snp_stat[ref]
-                alt_count, ref_count = np.asarray([alt_count, ref_count]) / (alt_count + ref_count)
-                df['CHROM'].append(chromosome)
-                df['POS'].append(snp_position)
-                df['BASE'].append('ACGT'[ref])
-                df['DEFAULT_PRIOR'].append(ref_count)
-
-                df['CHROM'].append(chromosome)
-                df['POS'].append(snp_position)
-                df['BASE'].append('ACGT'[alt])
-                df['DEFAULT_PRIOR'].append(alt_count)
-        prior_filename = here / 'new_snips.csv'
-        pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
-        print(f'Added {len(df["CHROM"]) // 2} new snps in total')
-        return prior_filename
 
     @staticmethod
     def check_genotypes_are_identical(genotypes1: ProbabilisticGenotypes, genotypes2: ProbabilisticGenotypes):

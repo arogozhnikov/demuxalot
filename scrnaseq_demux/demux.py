@@ -68,7 +68,7 @@ class ProbabilisticGenotypes:
                         # contribution is split between called values
                         contribution[call, donor_id] += prior_strength / len(called_values)
             not_provided = contribution.sum(axis=0) == 0
-            assert (~not_provided).sum() != 0
+            assert np.sum(~not_provided) != 0
             for row in range(len(contribution)):
                 contribution[row, not_provided] = contribution[row, ~not_provided].mean()
             self.variant_betas[snp_ids] += contribution
@@ -164,17 +164,19 @@ class Demultiplexer:
         number of possible modifications (AS limit in terms of cellranger/STAR alignment)
     Second one is used here.
     """
+    contribution_power = 2.
 
     @staticmethod
     def staged_genotype_learning(chromosome2compressed_snp_calls,
                                  genotypes: ProbabilisticGenotypes,
                                  barcode_handler: BarcodeHandler,
                                  n_iterations=5,
-                                 power=2,
                                  p_genotype_clip=0.01,
+                                 use_doublets=False,
+                                 doublet_prior=0.35,
                                  save_learnt_genotypes_to=None):
         variant_index2snp_index, variant_index2betas, _, calls = \
-            Demultiplexer.compute_compressed_snps(chromosome2compressed_snp_calls, genotypes)
+            Demultiplexer.pack_snps(chromosome2compressed_snp_calls, genotypes)
 
         n_barcodes = len(barcode_handler.barcode2index)
         n_genotypes = len(genotypes.genotype_names)
@@ -185,16 +187,14 @@ class Demultiplexer:
             genotype_prob = Demultiplexer._compute_probs_from_betas(
                 variant_index2snp_index, genotype_snp_posterior, p_genotype_clip=p_genotype_clip)
 
-            barcode_posterior_logits = np.zeros([n_barcodes, n_genotypes], dtype="float32")
-            for gindex in range(n_genotypes):
-                p = genotype_prob[calls['variant_id'], gindex]
-                # TODO track down usage of p_wrong_read (probably none) and p_wrong_group (should be somewhere in old compressing logic).
-                log_penalties = np.log(p * (1 - calls['p_base_wrong']) + calls['p_base_wrong'].clip(1e-4))
-                fast_np_add_at_1d(barcode_posterior_logits[:, gindex], calls['compressed_cb'], log_penalties)
+            barcode_posterior_logits, columns_names = Demultiplexer.compute_barcode_logits(
+                genotypes.genotype_names, calls, doublet_prior=doublet_prior, genotype_prob=genotype_prob,
+                n_barcodes=n_barcodes, n_genotypes=n_genotypes, only_singlets=not use_doublets,
+            )
 
             barcode_posterior_probs = softmax(barcode_posterior_logits, axis=-1)
             barcode_posterior_probs_df = pd.DataFrame(
-                data=barcode_posterior_probs, index=barcode_handler.ordered_barcodes, columns=genotypes.genotype_names,
+                data=barcode_posterior_probs, index=barcode_handler.ordered_barcodes, columns=columns_names,
             )
             # yielding here to provide aligned posteriors for genotypes and barcodes
             debug_information = {
@@ -209,8 +209,9 @@ class Demultiplexer:
 
             genotype_snp_posterior = variant_index2betas.copy()
             for gindex in range(n_genotypes):
+                # importantly, only singlets probabilities are used here
                 contribution = (barcode_posterior_probs[calls['compressed_cb'], gindex] * (
-                        1 - calls['p_base_wrong'])) ** power
+                        1 - calls['p_base_wrong'])) ** Demultiplexer.contribution_power
                 fast_np_add_at_1d(genotype_snp_posterior[:, gindex], calls['variant_id'], contribution)
 
     @staticmethod
@@ -223,7 +224,7 @@ class Demultiplexer:
             doublet_prior=0.35,
     ):
         variant_index2snp_index, variant_index2betas, _, calls = \
-            Demultiplexer.compute_compressed_snps(chromosome2compressed_snp_calls, genotypes)
+            Demultiplexer.pack_snps(chromosome2compressed_snp_calls, genotypes)
 
         n_genotypes = len(genotypes.genotype_names)
 
@@ -231,38 +232,14 @@ class Demultiplexer:
             variant_index2snp_index, variant_index2betas, p_genotype_clip=p_genotype_clip)
         assert np.isfinite(genotype_prob).all()
 
-        if only_singlets:
-            barcode_posterior_logits = np.zeros([len(barcode_handler.barcode2index), n_genotypes], dtype="float32")
-        else:
-            barcode_posterior_logits = np.zeros(
-                [len(barcode_handler.barcode2index), n_genotypes * (n_genotypes + 1) // 2])
+        barcode_posterior_logits, column_names = Demultiplexer.compute_barcode_logits(
+            genotypes.genotype_names, calls,
+            doublet_prior, genotype_prob,
+            n_barcodes=len(barcode_handler.barcode2index),
+            n_genotypes=n_genotypes,
+            only_singlets=only_singlets
+        )
 
-        column_names = []
-        for gindex, genotype in enumerate(genotypes.genotype_names):
-            p = genotype_prob[calls['variant_id'], gindex]
-            log_penalties = np.log(p * (1 - calls['p_base_wrong']) + calls['p_base_wrong'].clip(1e-4))
-            fast_np_add_at_1d(barcode_posterior_logits[:, gindex], calls['compressed_cb'], log_penalties)
-            column_names += [genotype]
-
-        if not only_singlets:
-            # computing correction for doublet as the prior proportion of doublets will
-            # otherwise depend on number of genotypes. Correction comes from
-            #  n_singlet_options / singlet_prior =
-            #  = n_doublet_options / doublet_prior * np.exp(doublet_logit_bonus)
-            doublet_logit_bonus = np.log(n_genotypes * doublet_prior)
-            doublet_logit_bonus -= np.log(n_genotypes * max(n_genotypes - 1, 0.01) / 2 * (1 - doublet_prior))
-
-            for gindex1, genotype1 in enumerate(genotypes.genotype_names):
-                for gindex2, genotype2 in enumerate(genotypes.genotype_names):
-                    if gindex1 < gindex2:
-                        p1 = genotype_prob[calls['variant_id'], gindex1]
-                        p2 = genotype_prob[calls['variant_id'], gindex2]
-                        p = (p1 + p2) * 0.5
-                        log_penalties = np.log(p * (1 - calls['p_base_wrong']) + calls['p_base_wrong'].clip(1e-4))
-                        fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], calls['compressed_cb'],
-                                          log_penalties)
-                        barcode_posterior_logits[:, len(column_names)] += doublet_logit_bonus
-                        column_names += [f'{genotype1}+{genotype2}']
         logits_df = pd.DataFrame(
             data=barcode_posterior_logits,
             index=list(barcode_handler.barcode2index), columns=column_names,
@@ -275,6 +252,39 @@ class Demultiplexer:
         probs_df.index.name = 'BARCODE'
         return logits_df, probs_df
 
+    @staticmethod
+    def compute_barcode_logits(genotype_names, calls, doublet_prior, genotype_prob, n_barcodes: int, n_genotypes,
+                               only_singlets):
+        if only_singlets:
+            barcode_posterior_logits = np.zeros([n_barcodes, n_genotypes], dtype="float32")
+        else:
+            barcode_posterior_logits = np.zeros([n_barcodes, n_genotypes * (n_genotypes + 1) // 2])
+        column_names = []
+        for gindex, genotype in enumerate(genotype_names):
+            p = genotype_prob[calls['variant_id'], gindex]
+            log_penalties = np.log(p * (1 - calls['p_base_wrong']) + calls['p_base_wrong'].clip(1e-4))
+            fast_np_add_at_1d(barcode_posterior_logits[:, gindex], calls['compressed_cb'], log_penalties)
+            column_names += [genotype]
+        if not only_singlets:
+            # computing correction for doublet as the prior proportion of doublets will
+            # otherwise depend on number of genotypes. Correction comes from
+            #  n_singlet_options / singlet_prior =
+            #  = n_doublet_options / doublet_prior * np.exp(doublet_logit_bonus)
+            doublet_logit_bonus = np.log(n_genotypes * doublet_prior)
+            doublet_logit_bonus -= np.log(n_genotypes * max(n_genotypes - 1, 0.01) / 2 * (1 - doublet_prior))
+
+            for gindex1, genotype1 in enumerate(genotype_names):
+                for gindex2, genotype2 in enumerate(genotype_names):
+                    if gindex1 < gindex2:
+                        p1 = genotype_prob[calls['variant_id'], gindex1]
+                        p2 = genotype_prob[calls['variant_id'], gindex2]
+                        p = (p1 + p2) * 0.5
+                        log_penalties = np.log(p * (1 - calls['p_base_wrong']) + calls['p_base_wrong'].clip(1e-4))
+                        fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], calls['compressed_cb'],
+                                          log_penalties)
+                        barcode_posterior_logits[:, len(column_names)] += doublet_logit_bonus
+                        column_names += [f'{genotype1}+{genotype2}']
+        return barcode_posterior_logits, column_names
 
     @staticmethod
     def _compute_probs_from_betas(variant_index2snp_index, variant_index2betas, p_genotype_clip):
@@ -312,8 +322,8 @@ class Demultiplexer:
         return barcode_calls
 
     @staticmethod
-    def compute_compressed_snps(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
-                                genotypes: ProbabilisticGenotypes):
+    def pack_snps(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
+                  genotypes: ProbabilisticGenotypes):
         chrom_pos_base2variant_index = genotypes.snp2snpid
         variant_index2betas = genotypes.variant_betas
         chrom_pos2snp_index = {}
@@ -356,4 +366,3 @@ class Demultiplexer:
 
         barcode_calls = Demultiplexer.molecule_calls2barcode_calls(molecule_calls)
         return variant_index2snp_index, variant_index2betas, molecule_calls, barcode_calls
-
