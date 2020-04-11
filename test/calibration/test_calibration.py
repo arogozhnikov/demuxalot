@@ -149,6 +149,8 @@ class TestClass(unittest.TestCase):
                 )
                 results[method.__name__, calls_name] = quals
             print(method.__name__)
+        pd.set_option("display.max_colwidth", 500)
+        pd.set_option("display.max_columns", 500)
         print(pd.DataFrame(results).T)
 
     @staticmethod
