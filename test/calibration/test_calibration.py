@@ -131,10 +131,33 @@ class TestClass(unittest.TestCase):
             barcode_calls['p_base_wrong'] = 0.1
             return barcode_calls
 
+        def deduplicate_all_molecules_to_barcodes_and_001(molecule_calls, barcode_calls):
+            cbub2lowest_p = {}
+            for variant_id, compressed_cb, compressed_ub, p_base_wrong, p_molecule_aligned_wrong in molecule_calls:
+                cbub2lowest_p[compressed_cb, compressed_ub] = min(
+                    p_molecule_aligned_wrong,
+                    cbub2lowest_p.get((compressed_cb, compressed_ub), 10.)
+                )
+
+            barcode_calls = {}  # variant_id, barcode_id -> p_base_wrong
+            for variant_id, compressed_cb, compressed_ub, p_base_wrong, p_molecule_aligned_wrong in molecule_calls:
+                if p_molecule_aligned_wrong > cbub2lowest_p[compressed_cb, compressed_ub]:
+                    continue
+                barcode_calls[variant_id, compressed_cb] = \
+                    barcode_calls.get((variant_id, compressed_cb), 1) * p_base_wrong
+
+            barcode_calls = np.array(
+                [(variant_id, cb, p_base_wrong) for (variant_id, cb), p_base_wrong in barcode_calls.items()],
+                dtype=[('variant_id', 'int32'), ('compressed_cb', 'int32'), ('p_base_wrong', 'float32')],
+            )
+
+            return barcode_calls
+
         methods = [
             use_molecules, use_molecules_zero_mistake, use_molecules_01_mistake, use_molecules_001_mistake,
             use_molecules_prob_sum, use_molecules_prob_sum_sqrt,
             use_barcodes, use_barcodes_zero_mistake, use_barcodes_01_mistake, use_barcodes_001_mistake,
+            deduplicate_all_molecules_to_barcodes_and_001,
         ]
         results = {}
         for method in methods:
@@ -165,7 +188,7 @@ class TestClass(unittest.TestCase):
     ):
         from scrnaseq_demux.demux import fast_np_add_at_1d, softmax
         variant_index2snp_index, variant_index2betas, molecule_calls, barcode_calls = \
-            Demultiplexer.pack_snps(chromosome2compressed_snp_calls, genotypes)
+            Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
 
         calls = compute_calls(molecule_calls, barcode_calls)
 

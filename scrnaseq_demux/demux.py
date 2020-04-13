@@ -176,7 +176,7 @@ class Demultiplexer:
                                  doublet_prior=0.35,
                                  save_learnt_genotypes_to=None):
         variant_index2snp_index, variant_index2betas, _, calls = \
-            Demultiplexer.pack_snps(chromosome2compressed_snp_calls, genotypes)
+            Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
 
         n_barcodes = len(barcode_handler.barcode2index)
         n_genotypes = len(genotypes.genotype_names)
@@ -224,7 +224,7 @@ class Demultiplexer:
             doublet_prior=0.35,
     ):
         variant_index2snp_index, variant_index2betas, _, calls = \
-            Demultiplexer.pack_snps(chromosome2compressed_snp_calls, genotypes)
+            Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
 
         n_genotypes = len(genotypes.genotype_names)
 
@@ -322,8 +322,8 @@ class Demultiplexer:
         return barcode_calls
 
     @staticmethod
-    def pack_snps(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
-                  genotypes: ProbabilisticGenotypes):
+    def pack_calls(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
+                   genotypes: ProbabilisticGenotypes):
         chrom_pos_base2variant_index = genotypes.snp2snpid
         variant_index2betas = genotypes.variant_betas
         chrom_pos2snp_index = {}
@@ -354,7 +354,9 @@ class Demultiplexer:
                 for pos, base_index in variant_calls[['snp_position', 'base_index']]
             ]
             fragment['compressed_cb'] = molecules['compressed_cb'][variant_calls['molecule_index']]
-            fragment['molecule_id'] = variant_calls['molecule_index'] + n_molecules
+            # TODO return. Or delete completely
+            # fragment['molecule_id'] = variant_calls['molecule_index'] + n_molecules
+            fragment['molecule_id'] = molecules['compressed_ub'][variant_calls['molecule_index']]
             fragment['p_base_wrong'] = variant_calls['p_base_wrong']
             fragment['p_molecule_aligned_wrong'] = molecules['p_group_misaligned'][variant_calls['molecule_index']]
 
