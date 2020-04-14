@@ -53,7 +53,7 @@ def detect_snps_for_chromosome(
         bamfile_path,
         chromosome=chromosome,
         chromosome_snps_zero_based=candidate_positions,
-        cellbarcode_compressor=lambda cb: barcode_handler.barcode2index.get(cb, None),
+        barcode_handler=barcode_handler,
         compute_p_read_misaligned=lambda read: 1e-4,
         discard_read=discard_read,
     )

@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 import pandas as pd
+import pysam
 
 
 def hash_string(s):
@@ -36,14 +37,37 @@ def fast_np_add_at_1d(x, indices, weights):
 
 
 class BarcodeHandler:
-    def __init__(self, barcodes):
+    def __init__(self, barcodes, RG_tags=None):
         """Barcode handler is needed to compress barcodes to integers,
-        because strings take too much space  """
+        because strings take too much space
+        :param barcodes: list of strings, each one is barcode (corresponds to barcode in cellranger)
+        :param RG_tags: optional list of the same length, used when RG tag should be used as a part of barcode identity.
+          RG tag shows original file when reads are merged from multiple bam files into one, because .
+          This may be very handy when you merge several bamfiles (e.g. for reproducible unbiased training of genotypes)
+        """
         assert not isinstance(barcodes, str), 'construct by passing list of possible barcodes'
         barcodes = list(barcodes)
+        self.use_rg = False
+        if RG_tags is not None:
+            RG_tags = list(RG_tags)
+            assert len(barcodes) == len(RG_tags), 'RG tags should be the same length as '
+            barcodes = [(barcode, rg) for barcode, rg in zip(barcodes, RG_tags)]
+            self.use_rg = True
+
         assert len(set(barcodes)) == len(barcodes), "all passed barcodes should be unique"
-        self.ordered_barcodes = barcodes
+        self.ordered_barcodes = list(sorted(barcodes))
         self.barcode2index = {bc: i for i, bc in enumerate(barcodes)}
+
+    def get_barcode_index(self, read: pysam.AlignedRead):
+        """ Returns None if barcode is not in the whitelist, otherwise a small integer """
+        if not read.has_tag("CB"):
+            return None
+        if self.use_rg:
+            # require RG tag to be available for each read
+            barcode = read.get_tag("CB"), read.get_tag('RG')
+        else:
+            barcode = read.get_tag("CB")
+        return self.barcode2index.get(barcode, None)
 
     @staticmethod
     def from_file(barcodes_filename):

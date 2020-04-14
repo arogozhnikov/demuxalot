@@ -224,7 +224,7 @@ def count_call_variants_for_chromosome(
         bamfile_or_filename,
         chromosome,
         chromosome_snps_zero_based,
-        cellbarcode_compressor,
+        barcode_handler: BarcodeHandler,
         compute_p_read_misaligned,
         discard_read,
         start=None,
@@ -248,9 +248,7 @@ def count_call_variants_for_chromosome(
 
         if discard_read(read):
             continue
-        if not read.has_tag("CB"):
-            continue
-        cb = cellbarcode_compressor(read.get_tag("CB"))
+        cb = barcode_handler.get_barcode_index(read)
         if cb is None:
             continue
         if not read.has_tag("UB"):
@@ -304,7 +302,7 @@ def count_snps(
                 positions,
                 start=start,
                 stop=stop,
-                cellbarcode_compressor=lambda cb: barcode_handler.barcode2index.get(cb, None),
+                barcode_handler=barcode_handler,
                 compute_p_read_misaligned=compute_p_misaligned,
                 discard_read=discard_read,
             )

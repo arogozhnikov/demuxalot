@@ -188,7 +188,7 @@ class Demultiplexer:
         variant_index2snp_index, variant_index2betas, _, calls = \
             Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
 
-        n_barcodes = len(barcode_handler.barcode2index)
+        n_barcodes = len(barcode_handler.ordered_barcodes)
         n_genotypes = len(genotypes.genotype_names)
 
         genotype_snp_posterior = variant_index2betas.copy()
@@ -245,19 +245,19 @@ class Demultiplexer:
         barcode_posterior_logits, column_names = Demultiplexer.compute_barcode_logits(
             genotypes.genotype_names, calls,
             doublet_prior, genotype_prob,
-            n_barcodes=len(barcode_handler.barcode2index),
+            n_barcodes=len(barcode_handler.ordered_barcodes),
             n_genotypes=n_genotypes,
             only_singlets=only_singlets
         )
 
         logits_df = pd.DataFrame(
             data=barcode_posterior_logits,
-            index=list(barcode_handler.barcode2index), columns=column_names,
+            index=list(barcode_handler.ordered_barcodes), columns=column_names,
         )
         logits_df.index.name = 'BARCODE'
         probs_df = pd.DataFrame(
             data=softmax(barcode_posterior_logits, axis=1),
-            index=list(barcode_handler.barcode2index), columns=column_names,
+            index=list(barcode_handler.ordered_barcodes), columns=column_names,
         )
         probs_df.index.name = 'BARCODE'
         return logits_df, probs_df
