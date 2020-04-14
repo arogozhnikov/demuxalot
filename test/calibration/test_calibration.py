@@ -14,8 +14,6 @@ here = Path(__file__).parent
 
 class TestClass(unittest.TestCase):
     def setUp(self):
-        # TODO better guesses for organoids should be provided
-
         if Path(here / 'composed_10_perlane_sorted.bam').exists():
             with open(here / 'lane2guessed_donor.json') as f:
                 self.lane2inferred_genotypes = {k.split('_')[-1]: v for k, v in json.load(f).items()}
