@@ -70,10 +70,16 @@ def double_array(array):
     return np.concatenate([array, array], axis=0)
 
 
-# TODO not ignoring duplicates!
 class CompressedSNPCalls:
     def __init__(self, start_snps_size=1024, start_molecule_size=128):
-        # important. This does NOT remove duplicates
+        """
+        Keeps calls from one chromosome in a compressed format
+        :param start_snps_size:
+        :param start_molecule_size:
+        """
+        # internal representation of molecules and calls is structured numpy arrays
+        # numpy can't add elements dynamically so we do that manually.
+        # First elements of array are occupied, number of elements is kept separately
         self.n_molecules = 0
         self.molecules = np.array(
             [(-1, -1, -1.)] * start_molecule_size,
@@ -87,7 +93,7 @@ class CompressedSNPCalls:
                    ('p_base_wrong', 'float32')]
         )
 
-    def add_group_snps(self, compressed_cb, compressed_ub, p_group_misaligned, snps):
+    def add_calls_from_read_group(self, compressed_cb, compressed_ub, p_group_misaligned, snps):
         if len(snps) + self.n_snp_calls > len(self.snp_calls):
             self.snp_calls = double_array(self.snp_calls)
         if self.n_molecules == len(self.molecules):
@@ -108,29 +114,26 @@ class CompressedSNPCalls:
         assert np.all(self.snp_calls['p_base_wrong'] != -1)
 
     @staticmethod
-    def merge(chromosome_snpcalls: List[Tuple[str, 'CompressedSNPCalls']],
-              chrom_pos2sindex):
-        for chromosome, snp_calls in chromosome_snpcalls:
-            assert isinstance(snp_calls, CompressedSNPCalls)
+    def concatenate(snp_calls_list: List['CompressedSNPCalls']) -> 'CompressedSNPCalls':
+        """ concatenates snp calls from the same chromosome """
+        n_molecules = 0
+        collected_calls = []
+        collected_molecules = []
+        for calls in snp_calls_list:
+            variant_calls = calls.snp_calls[:calls.n_snp_calls].copy()
+            variant_calls['molecule_index'] += n_molecules
 
-        merged_snps = np.array(
-            [(-1, -1, 255, -1.)] * sum(x.n_snp_calls for _, x in chromosome_snpcalls),
-            dtype=[('mindex', 'int32'), ('sindex', 'int32'), ('base_index', 'uint8'), ('p_base_wrong', 'float32')]
-        )
-        mindex2bindex = []
-        fragment_start = 0
-        for chromosome, snp_calls in chromosome_snpcalls:
-            fragment_end = fragment_start + snp_calls.n_snp_calls
-            fragment = merged_snps[fragment_start:fragment_end]
-            source = snp_calls.snp_calls[:snp_calls.n_snp_calls]
-            fragment['mindex'] = source['molecule_index'] + len(mindex2bindex)
-            fragment['sindex'] = [chrom_pos2sindex[chromosome, pos] for pos in source['snp_position']]
-            fragment['base_index'] = source['base_index']
-            fragment['p_base_wrong'] = source['p_base_wrong']
-            mindex2bindex.extend(snp_calls.molecules['compressed_cb'][:snp_calls.n_molecules])
-            fragment_start = fragment_end
+            collected_calls.append(variant_calls)
+            collected_molecules.append(calls.molecules[:calls.n_molecules])
+            # return none
+            n_molecules += calls.n_molecules
 
-        return mindex2bindex, merged_snps
+        result = CompressedSNPCalls()
+        result.molecules = np.concatenate(collected_molecules)
+        result.n_molecules = len(result.molecules)
+        result.snp_calls = np.concatenate(collected_calls)
+        result.n_snp_calls = len(result.snp_calls)
+        return result
 
 
 def compress_cbub_reads_group_to_snips(
@@ -211,7 +214,7 @@ def compress_old_cbub_groups(
                 # there is no reason to care about this group, it provides no genotype information
                 continue
             # keep only one alignment group per cbub while treating others as misalignment
-            compressed_snp_calls.add_group_snps(cbub[0], cbub[1], p_group_misaligned, snips)
+            compressed_snp_calls.add_calls_from_read_group(cbub[0], cbub[1], p_group_misaligned, snips)
 
     for cbub in to_remove:
         cbub2position_and_reads.pop(cbub)
@@ -224,7 +227,9 @@ def count_call_variants_for_chromosome(
         cellbarcode_compressor,
         compute_p_read_misaligned,
         discard_read,
-) -> CompressedSNPCalls:
+        start=None,
+        stop=None,
+) -> Tuple[str, CompressedSNPCalls]:
     prev_segment = None
     compressed_snp_calls = CompressedSNPCalls()
     cbub2position_and_reads = {}
@@ -232,7 +237,7 @@ def count_call_variants_for_chromosome(
     if isinstance(bamfile_or_filename, str):
         bamfile_or_filename = pysam.AlignmentFile(bamfile_or_filename)
 
-    for read in bamfile_or_filename.fetch(chromosome):
+    for read in bamfile_or_filename.fetch(chromosome, start=start, stop=stop):
         curr_segment = read.pos // 1000
         if curr_segment != prev_segment:
             compress_old_cbub_groups(
@@ -261,7 +266,7 @@ def count_call_variants_for_chromosome(
         np.inf, cbub2position_and_reads, compressed_snp_calls, snp_lookup, compute_p_read_misaligned,
     )
     compressed_snp_calls.minimize_memory_footprint()
-    return compressed_snp_calls
+    return chromosome, compressed_snp_calls
 
 
 def count_snps(
@@ -290,28 +295,61 @@ def count_snps(
     :return: returns an object which stores information about molecules, their SNPs and barcodes,
         that can be used by demultiplexer
     """
-    chromosome2positions = list(chromosome2positions.items())
-    with pysam.AlignmentFile(bamfile_location) as f:
-        f: pysam.AlignmentFile = f
-        chromosome2nreads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
-
-        def chromosome_order(chromosome, positions):
-            # simple estimate for number of SNP calls under 'even distribution' assumption
-            return -chromosome2nreads[chromosome] * len(positions) / f.get_reference_length(chromosome)
-
-        chromosome2positions = list(sorted(chromosome2positions, key=lambda chr_pos: chromosome_order(*chr_pos)))
+    jobs = plan_counting_jobs(bamfile_location, chromosome2positions)
 
     with joblib.Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity) as parallel:
-        _cbub2qual_and_snps = parallel(
+        chromosome2compressed_snp_calls = parallel(
             joblib.delayed(count_call_variants_for_chromosome)(
                 bamfile_location,
                 chromosome,
                 positions,
+                start=start,
+                stop=stop,
                 cellbarcode_compressor=lambda cb: barcode_handler.barcode2index.get(cb, None),
                 compute_p_read_misaligned=compute_p_misaligned,
                 discard_read=discard_read,
             )
-            for chromosome, positions in chromosome2positions
+            for chromosome, start, stop, positions in jobs
         )
-    chromosome2compressed_snp_calls = dict(zip([chrom for chrom, _ in chromosome2positions], _cbub2qual_and_snps))
+    _chr2calls = defaultdict(list)
+    for chromosome, calls in chromosome2compressed_snp_calls:
+        _chr2calls[chromosome].append(calls)
+
+    chromosome2compressed_snp_calls = {
+        chromosome: CompressedSNPCalls.concatenate(chromosome_calls)
+        for chromosome, chromosome_calls
+        in _chr2calls.items()
+    }
+
     return chromosome2compressed_snp_calls
+
+
+def plan_counting_jobs(
+        bamfile_location,
+        chromosome2positions: Dict[str, np.ndarray],
+        n_reads_per_job: int = 10_000_000,
+        minimum_fragment_length_per_job: int = 5_000,
+        minimum_overlap: int = 100,
+):
+    with pysam.AlignmentFile(bamfile_location) as f:
+        chromosome2n_reads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
+
+    jobs = []  # chromosome, start, stop, positions
+    for chromosome, positions in chromosome2positions.items():
+        length = f.get_reference_length(chromosome)
+        n_jobs = min(
+            chromosome2n_reads[chromosome] // n_reads_per_job,
+            length // minimum_fragment_length_per_job
+        )
+        n_jobs = max(1, n_jobs)
+
+        # now need to find a good split
+        split_ids = np.searchsorted(positions, np.linspace(0, length, n_jobs + 1)[1:-1])
+        for positions_subset in np.split(positions, split_ids):
+            if len(positions_subset) == 0:
+                continue
+            start = max(0, min(positions_subset) - minimum_overlap)
+            stop = min(length, max(positions_subset) + minimum_overlap)
+            jobs.append((chromosome, start, stop, positions_subset))
+
+    return jobs
