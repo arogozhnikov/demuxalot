@@ -7,7 +7,7 @@ import pysam
 from scipy.special import softmax
 
 from scrnaseq_demux.snp_counter import CompressedSNPCalls
-from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, decompress_base
+from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, decompress_base, Timer, compress_base
 
 
 class ProbabilisticGenotypes:
@@ -44,6 +44,7 @@ class ProbabilisticGenotypes:
         :param vcf_file_name: path to VCF file. Only diploid values are accepted (0/0, 0/1, 1/1, ./.).
             Should contain all genotypes of interest. Can contain additional genotypes, but those will be ignored.
         """
+        n_skipped_snps = 0
         for snp in pysam.VariantFile(vcf_file_name).fetch():
             if any(len(option) != 1 for option in snp.alleles):
                 print('skipping non-snp, alleles = ', snp.alleles, snp.chrom, snp.pos)
@@ -51,14 +52,19 @@ class ProbabilisticGenotypes:
             self.extend_variants(len(snp.alleles))
 
             snp_ids = []
-            for allele in snp.alleles:
-                # pysam enumerates starting from one
+            alleles = snp.alleles
+            if len(set(alleles)) != len(alleles):
+                n_skipped_snps += 1
+                continue
+            for allele in alleles:
+                # pysam enumerates starting from one, thus -1
                 variant = (snp.chrom, snp.pos - 1, allele)
                 if variant not in self.snp2snpid:
                     self.snp2snpid[variant] = self.n_variants
                     self.n_variants += 1
                 snp_ids.append(self.snp2snpid[variant])
-            assert len(set(snp_ids)) == len(snp_ids)
+
+            assert len(set(snp_ids)) == len(snp_ids), (snp_ids, snp.chrom, snp.pos, snp.alleles)
 
             contribution = np.zeros([len(snp_ids), len(self.genotype_names)], dtype='float32')
             for donor_id, donor in enumerate(self.genotype_names):
@@ -68,10 +74,14 @@ class ProbabilisticGenotypes:
                         # contribution is split between called values
                         contribution[call, donor_id] += prior_strength / len(called_values)
             not_provided = contribution.sum(axis=0) == 0
-            assert np.sum(~not_provided) != 0
+            if np.sum(~not_provided) < 2:
+                n_skipped_snps += 1
+                continue
             for row in range(len(contribution)):
                 contribution[row, not_provided] = contribution[row, ~not_provided].mean()
             self.variant_betas[snp_ids] += contribution
+        if n_skipped_snps > 0:
+            print('skipped', n_skipped_snps)
 
     def add_prior_betas(self, prior_filename, *, prior_strength):
         """
@@ -307,25 +317,107 @@ class Demultiplexer:
     #     snp_bindices, snp_sindices, snp_is_alt = np.asarray(list(bindex_sindex_alt2prob), dtype="int32").T
     #     snp_p_wrong = np.asarray(list(bindex_sindex_alt2prob.values()), dtype="float32")
     #     return snp_bindices, snp_is_alt, snp_p_wrong, snp_sindices
+    #
+    # @staticmethod
+    # def molecule_calls2barcode_calls(molecule_calls):
+    #     with Timer('molecule_calls2barcode_calls old'):
+    #         barcode_calls = {}  # variant_id, barcode_id -> p_base_wrong
+    #         for variant_id, compressed_cb, molecule_id, p_base_wrong, p_molecule_aligned_wrong in molecule_calls:
+    #             barcode_calls[variant_id, compressed_cb] = barcode_calls.get((variant_id, compressed_cb), 1) * p_base_wrong
+    #
+    #         barcode_calls = np.array(
+    #             [(variant_id, cb, p_base_wrong) for (variant_id, cb), p_base_wrong in barcode_calls.items()],
+    #             dtype=[('variant_id', 'int32'), ('compressed_cb', 'int32'), ('p_base_wrong', 'float32')],
+    #         )
+    #     with Timer('molecule_calls2barcode_calls new'):
+    #         barcode_calls_new = Demultiplexer.molecule_calls2barcode_calls_new(molecule_calls)
+    #     barcode_calls = np.sort(barcode_calls)
+    #     barcode_calls_new = np.sort(barcode_calls_new)
+    #     assert np.array_equal(barcode_calls['variant_id'], barcode_calls_new['variant_id'])
+    #     assert np.array_equal(barcode_calls['compressed_cb'], barcode_calls_new['compressed_cb'])
+    #     assert np.allclose(barcode_calls['p_base_wrong'], barcode_calls_new['p_base_wrong'], rtol=1e-2)
+    #     return barcode_calls
 
     @staticmethod
     def molecule_calls2barcode_calls(molecule_calls):
-        barcode_calls = {}  # variant_id, barcode_id -> p_base_wrong
-        for variant_id, compressed_cb, molecule_id, p_base_wrong, p_molecule_aligned_wrong in molecule_calls:
-            barcode_calls[variant_id, compressed_cb] = barcode_calls.get((variant_id, compressed_cb), 1) * p_base_wrong
-
-        barcode_calls = np.array(
-            [(variant_id, cb, p_base_wrong) for (variant_id, cb), p_base_wrong in barcode_calls.items()],
-            dtype=[('variant_id', 'int32'), ('compressed_cb', 'int32'), ('p_base_wrong', 'float32')],
+        barcode_calls_without_p, indices = np.unique(molecule_calls[['variant_id', 'compressed_cb']],
+                                                     return_inverse=True)
+        p_base_wrong = np.ones(len(barcode_calls_without_p), dtype='float32')
+        np.multiply.at(p_base_wrong, indices, molecule_calls['p_base_wrong'])
+        return np.rec.fromarrays(
+            [barcode_calls_without_p['variant_id'], barcode_calls_without_p['compressed_cb'], p_base_wrong],
+            names=['variant_id', 'compressed_cb', 'p_base_wrong']
         )
-
-        return barcode_calls
 
     @staticmethod
     def pack_calls(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
                    genotypes: ProbabilisticGenotypes):
+        with Timer('pack old'):
+            chrom_pos_base2variant_index = genotypes.snp2snpid
+            variant_index2betas = genotypes.variant_betas
+            chrom_pos2snp_index = {}
+            variant_index2snp_index = np.zeros(len(variant_index2betas), dtype='int32')
+            for (chrom, pos, _base), variant_index in chrom_pos_base2variant_index.items():
+                if (chrom, pos) not in chrom_pos2snp_index:
+                    chrom_pos2snp_index[chrom, pos] = len(chrom_pos2snp_index)
+                snp_index = chrom_pos2snp_index[chrom, pos]
+                variant_index2snp_index[variant_index] = snp_index
+
+            assert np.all(variant_index2betas > 0), 'bad loaded genotypes, negative betas appeared'
+
+            molecule_calls = np.array(
+                [(-1, -1, -1, -1., -1.)] * sum(calls.n_snp_calls for calls in chromosome2compressed_snp_calls.values()),
+                dtype=[('variant_id', 'int32'), ('compressed_cb', 'int32'), ('molecule_id', 'int32'),
+                       ('p_base_wrong', 'float32'), ('p_molecule_aligned_wrong', 'float32')]
+            )
+
+            start = 0
+            n_molecules = 0
+            for chromosome, compressed_snp_calls in chromosome2compressed_snp_calls.items():
+                variant_calls = compressed_snp_calls.snp_calls[:compressed_snp_calls.n_snp_calls]
+                molecules = compressed_snp_calls.molecules[:compressed_snp_calls.n_molecules]
+
+                fragment = molecule_calls[start:start + compressed_snp_calls.n_snp_calls]
+                fragment['variant_id'] = [
+                    chrom_pos_base2variant_index.get((chromosome, pos, decompress_base(base_index)), -1)
+                    for pos, base_index in variant_calls[['snp_position', 'base_index']]
+                ]
+                fragment['compressed_cb'] = molecules['compressed_cb'][variant_calls['molecule_index']]
+                # TODO return. Or delete completely
+                # fragment['molecule_id'] = variant_calls['molecule_index'] + n_molecules
+                fragment['molecule_id'] = molecules['compressed_ub'][variant_calls['molecule_index']]
+                fragment['p_base_wrong'] = variant_calls['p_base_wrong']
+                fragment['p_molecule_aligned_wrong'] = molecules['p_group_misaligned'][variant_calls['molecule_index']]
+
+                start += compressed_snp_calls.n_snp_calls
+                n_molecules += compressed_snp_calls.n_molecules
+
+            # filtering from those calls that did not match any snp
+            molecule_calls = molecule_calls[molecule_calls['variant_id'] != -1]
+
+            barcode_calls = Demultiplexer.molecule_calls2barcode_calls(molecule_calls)
+        with Timer('pack new'):
+            variant_index2snp_index2, variant_index2betas2, molecule_calls2, barcode_calls2 = Demultiplexer.pack_calls_new(chromosome2compressed_snp_calls, genotypes)
+        assert np.array_equal(variant_index2snp_index2, variant_index2snp_index)
+        assert np.array_equal(variant_index2betas2, variant_index2betas)
+        assert np.array_equal(molecule_calls2, molecule_calls)
+        assert np.array_equal(barcode_calls2, barcode_calls)
+
+        return variant_index2snp_index, variant_index2betas, molecule_calls, barcode_calls
+
+    @staticmethod
+    def pack_calls_new(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
+                       genotypes: ProbabilisticGenotypes):
         chrom_pos_base2variant_index = genotypes.snp2snpid
+        pos_base_chrom_variant = np.array(
+            [(pos, compress_base(base), chrom,  variant_index)
+             for (chrom, pos, base), variant_index in chrom_pos_base2variant_index.items()],
+            dtype=[('snp_position', 'int32'), ('base_index', 'uint8'), ('chrom', 'O'), ('variant_index', 'int32')]
+        )
+        pos_base_chrom_variant = np.sort(pos_base_chrom_variant)
+
         variant_index2betas = genotypes.variant_betas
+
         chrom_pos2snp_index = {}
         variant_index2snp_index = np.zeros(len(variant_index2betas), dtype='int32')
         for (chrom, pos, _base), variant_index in chrom_pos_base2variant_index.items():
@@ -349,10 +441,14 @@ class Demultiplexer:
             molecules = compressed_snp_calls.molecules[:compressed_snp_calls.n_molecules]
 
             fragment = molecule_calls[start:start + compressed_snp_calls.n_snp_calls]
-            fragment['variant_id'] = [
-                chrom_pos_base2variant_index.get((chromosome, pos, decompress_base(base_index)), -1)
-                for pos, base_index in variant_calls[['snp_position', 'base_index']]
-            ]
+            lookup = pos_base_chrom_variant[pos_base_chrom_variant['chrom'] == chromosome]
+            index = lookup[['snp_position', 'base_index']]
+            searched = variant_calls[['snp_position', 'base_index']]
+            variant_id = np.searchsorted(index[['snp_position', 'base_index']], searched).clip(0, len(index) - 1)  # fighting being out of bounds
+            variant_id = np.where(index[variant_id] == searched, lookup['variant_index'][variant_id], -1)
+
+            fragment['variant_id'] = variant_id
+            assert np.array_equal(variant_id, fragment['variant_id'])
             fragment['compressed_cb'] = molecules['compressed_cb'][variant_calls['molecule_index']]
             # TODO return. Or delete completely
             # fragment['molecule_id'] = variant_calls['molecule_index'] + n_molecules
