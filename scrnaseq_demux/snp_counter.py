@@ -334,22 +334,22 @@ def plan_counting_jobs(
     with pysam.AlignmentFile(bamfile_location) as f:
         chromosome2n_reads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
 
-    jobs = []  # chromosome, start, stop, positions
-    for chromosome, positions in chromosome2positions.items():
-        length = f.get_reference_length(chromosome)
-        n_jobs = min(
-            chromosome2n_reads[chromosome] // n_reads_per_job,
-            length // minimum_fragment_length_per_job
-        )
-        n_jobs = max(1, n_jobs)
+        jobs = []  # chromosome, start, stop, positions
+        for chromosome, positions in chromosome2positions.items():
+            length = f.get_reference_length(chromosome)
+            n_jobs = min(
+                chromosome2n_reads[chromosome] // n_reads_per_job,
+                length // minimum_fragment_length_per_job
+            )
+            n_jobs = max(1, n_jobs)
 
-        # now need to find a good split
-        split_ids = np.searchsorted(positions, np.linspace(0, length, n_jobs + 1)[1:-1])
-        for positions_subset in np.split(positions, split_ids):
-            if len(positions_subset) == 0:
-                continue
-            start = max(0, min(positions_subset) - minimum_overlap)
-            stop = min(length, max(positions_subset) + minimum_overlap)
-            jobs.append((chromosome, start, stop, positions_subset))
+            # now need to find a good split
+            split_ids = np.searchsorted(positions, np.linspace(0, length, n_jobs + 1)[1:-1])
+            for positions_subset in np.split(positions, split_ids):
+                if len(positions_subset) == 0:
+                    continue
+                start = max(0, min(positions_subset) - minimum_overlap)
+                stop = min(length, max(positions_subset) + minimum_overlap)
+                jobs.append((chromosome, start, stop, positions_subset))
 
     return jobs
