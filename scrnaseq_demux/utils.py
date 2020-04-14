@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pandas as pd
 
@@ -5,7 +7,7 @@ import pandas as pd
 def hash_string(s):
     """
     Used to compress UB (molecule barcodes) to group identical ones.
-    Mapping is unique and fast for UBs used.
+    Mapping is deterministic, unique and fast for UBs used.
     """
     result = 0
     for c in s:
@@ -71,3 +73,16 @@ def read_vcf_to_header_and_pandas(vcf_filename):
     # switching to zero-based
     df["POS"] -= 1
     return header_lines, df.rename(columns={"#CHROM": "CHROM"})
+
+
+class Timer:
+    def __init__(self, name):
+        self.name = name
+        self.start_time = time.time()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.time_taken = time.time() - self.start_time
+        print("Timer {} completed in  {:.3f} seconds".format(self.name, self.time_taken))
