@@ -142,7 +142,7 @@ class ProbabilisticGenotypes:
 
     def save_betas(self, path_or_buf, *, external_betas: np.ndarray = None):
         columns = defaultdict(list)
-        betas = self.variant_betas
+        betas = self.variant_betas[:self.n_variants]
         if external_betas is not None:
             assert betas.shape == external_betas.shape
             assert betas.dtype == external_betas.dtype
@@ -425,9 +425,7 @@ class Demultiplexer:
         variant_index2snp_index[pos_base_chrom_variant['variant_index']] = snp_indices
         assert len(chrom_pos_base2variant_index) == len(variant_index2betas)
         assert np.allclose(np.sort(pos_base_chrom_variant['variant_index']), np.arange(len(pos_base_chrom_variant)))
-
-        assert np.all(variant_index2snp_index >= 0), (
-        variant_index2snp_index[variant_index2snp_index <= 0], variant_index2snp_index)
+        assert np.all(variant_index2snp_index >= 0)
         assert np.all(variant_index2betas > 0), 'bad loaded genotypes, negative betas appeared'
 
         molecule_calls = np.array(
