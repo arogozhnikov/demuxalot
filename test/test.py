@@ -1,31 +1,15 @@
 import json
 import pprint
-from collections import defaultdict
+import unittest
 from pathlib import Path
 
-import joblib
 import numpy as np
-import pandas as pd
-import unittest
-import time
 from scipy.special import softmax
 
 from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
+from scrnaseq_demux.utils import Timer
 
 here = Path(__file__).parent
-
-
-class Timer:
-    def __init__(self, name):
-        self.name = name
-        self.start_time = time.time()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        self.time_taken = time.time() - self.start_time
-        print("Timer {} completed in  {:.3f} seconds".format(self.name, self.time_taken))
 
 
 class TestClass(unittest.TestCase):
@@ -55,7 +39,6 @@ class TestClass(unittest.TestCase):
         self.genotypes_used = genotypes_used
         self.chromosome2snp_calls = self.count_snps()
 
-
     @staticmethod
     def check_genotypes_are_identical(genotypes1: ProbabilisticGenotypes, genotypes2: ProbabilisticGenotypes):
         assert len(genotypes1.snp2snpid) == len(genotypes2.snp2snpid)
@@ -80,11 +63,16 @@ class TestClass(unittest.TestCase):
         with Timer('verifying agreement'):
             self.check_genotypes_are_identical(self.genotypes_used, genotypes_loaded)
 
-    def check_reverse_order_of_addition(self):
+    def test_reverse_order_of_addition_to_genotypes(self):
+        genotypes_straight = ProbabilisticGenotypes(self.used_genotypes_names)
+        genotypes_straight.add_prior_betas(self.prior_filename, prior_strength=10)
+        genotypes_straight.add_vcf(self.vcf_filename, prior_strength=100)
+
         genotypes_reverse = ProbabilisticGenotypes(self.used_genotypes_names)
         genotypes_reverse.add_prior_betas(self.prior_filename, prior_strength=10)
         genotypes_reverse.add_vcf(self.vcf_filename, prior_strength=100)
-        self.check_genotypes_are_identical(self.genotypes_used, genotypes_reverse)
+
+        self.check_genotypes_are_identical(genotypes_straight, genotypes_reverse)
 
         kwargs = dict(
             chromosome2compressed_snp_calls=self.chromosome2snp_calls,
@@ -92,10 +80,19 @@ class TestClass(unittest.TestCase):
             only_singlets=True,
         )
 
-        posteriors1 = Demultiplexer.predict_posteriors(**kwargs, genotypes=self.genotypes_used)
+        posteriors1 = Demultiplexer.predict_posteriors(**kwargs, genotypes=genotypes_straight)
         posteriors2 = Demultiplexer.predict_posteriors(**kwargs, genotypes=genotypes_reverse)
         assert np.all(posteriors1[0] == posteriors2[0])
         assert np.all(posteriors1[1] == posteriors2[1])
+
+    def test_exporting_and_loading_genotypes(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile() as temp:
+            self.genotypes_used.save_betas(temp.name)
+            loaded_genotypes = ProbabilisticGenotypes(genotype_names=self.genotypes_used.genotype_names,
+                                                      default_prior=self.genotypes_used.default_prior)
+            loaded_genotypes.add_prior_betas(temp.name, prior_strength=1.)
+        self.check_genotypes_are_identical(self.genotypes_used, loaded_genotypes)
 
     def count_snps(self):
         with Timer('new_snp_counting'):
@@ -155,6 +152,11 @@ class TestClass(unittest.TestCase):
             assert np.allclose(logits_singlet, logits_doublet.loc[:, logits_singlet.columns])
             assert np.allclose(prob_singlet.sum(axis=1), 1, atol=1e-4), prob_singlet.sum(axis=1)
             assert np.allclose(prob_doublet.sum(axis=1), 1, atol=1e-4), prob_doublet.sum(axis=1)
+            # checking that setting doublet prior to something small is identical to just singlets
+            logits_doublet_pseudo, prob_doublet_pseudo = Demultiplexer.predict_posteriors(
+                **kwargs, only_singlets=False, doublet_prior=1e-8)
+            print(prob_singlet / prob_doublet_pseudo.loc[:, prob_singlet.columns])
+            assert np.allclose(prob_singlet, prob_doublet_pseudo.loc[:, prob_singlet.columns], atol=1e-3)
 
     def test_demultiplexing_agaisnt_historical_result(self):
         with Timer('demultiplexing'):
