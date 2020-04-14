@@ -442,6 +442,9 @@ class Demultiplexer:
 
             fragment = molecule_calls[start:start + compressed_snp_calls.n_snp_calls]
             lookup = pos_base_chrom_variant[pos_base_chrom_variant['chrom'] == chromosome]
+            if len(lookup) == 0:
+                # no snps in genotype for this chromosome
+                continue
             index = lookup[['snp_position', 'base_index']]
             searched = variant_calls[['snp_position', 'base_index']]
             variant_id = np.searchsorted(index[['snp_position', 'base_index']], searched).clip(0, len(index) - 1)  # fighting being out of bounds
