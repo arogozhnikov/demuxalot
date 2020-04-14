@@ -295,9 +295,8 @@ def count_snps(
     :return: returns an object which stores information about molecules, their SNPs and barcodes,
         that can be used by demultiplexer
     """
-    jobs = plan_counting_jobs(bamfile_location, chromosome2positions)
-
-    with joblib.Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity) as parallel:
+    jobs = prepare_counting_tasks(bamfile_location, chromosome2positions)
+    with joblib.Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity, pre_dispatch='all') as parallel:
         chromosome2compressed_snp_calls = parallel(
             joblib.delayed(count_call_variants_for_chromosome)(
                 bamfile_location,
@@ -324,7 +323,7 @@ def count_snps(
     return chromosome2compressed_snp_calls
 
 
-def plan_counting_jobs(
+def prepare_counting_tasks(
         bamfile_location,
         chromosome2positions: Dict[str, np.ndarray],
         n_reads_per_job: int = 10_000_000,
@@ -334,7 +333,7 @@ def plan_counting_jobs(
     with pysam.AlignmentFile(bamfile_location) as f:
         chromosome2n_reads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
 
-        jobs = []  # chromosome, start, stop, positions
+        tasks = []  # chromosome, start, stop, positions
         for chromosome, positions in chromosome2positions.items():
             length = f.get_reference_length(chromosome)
             n_jobs = min(
@@ -350,6 +349,14 @@ def plan_counting_jobs(
                     continue
                 start = max(0, min(positions_subset) - minimum_overlap)
                 stop = min(length, max(positions_subset) + minimum_overlap)
-                jobs.append((chromosome, start, stop, positions_subset))
+                task = (chromosome, start, stop, positions_subset)
+                # very naive and strange heuristic for
+                complexity = len(positions_subset) * chromosome2n_reads[chromosome] / length ** 0.5
+                tasks.append((-complexity, task))
 
-    return jobs
+    tasks = [task for complexity, task in sorted(tasks)]
+    # for the exception of 20 last jobs, interweave complex and simple tasks
+    # this is to minimize peak memory usage, but make sure all cores are busy
+    tasks[:-20:2] = tasks[:-20:2][::-1]
+    return tasks
+
