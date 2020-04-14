@@ -49,7 +49,7 @@ def detect_snps_for_chromosome(
 
     # stage2. collect detailed counts about snp candidates
     # possible optimization - minimize amount of barcodes passed here to those have donor associated
-    compressed_snp_calls = count_call_variants_for_chromosome(
+    _, compressed_snp_calls = count_call_variants_for_chromosome(
         bamfile_path,
         chromosome=chromosome,
         chromosome_snps_zero_based=candidate_positions,
@@ -142,8 +142,7 @@ def detect_snps_positions(
         compute_p_misaligned=compute_p_read_misaligned,
     )
 
-    # returns two dataframes with likelihoods and posterior probabilities
-    likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
+    _likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
         snps,
         genotypes=genotypes,
         barcode_handler=barcode_handler,
@@ -154,7 +153,7 @@ def detect_snps_positions(
     for donor in genotypes.genotype_names:
         print('During inferring SNPs for', donor, 'will use', donor_counts[donor], 'barcodes')
 
-    # step2. detect SNPs on
+    # step2. collect SNPs using predictions from rough demultiplexing
     with pysam.AlignmentFile(bamfile_location) as f:
         chromosomes = [x.contig for x in f.get_index_statistics()]
 
@@ -217,5 +216,5 @@ def _export_snps_to_beta(selected_snps, prior_filename):
     # normalize counts at each position so priors sum up to unity
     df = pd.DataFrame(df)
     df['DEFAULT_PRIOR'] = df.groupby(['CHROM', 'POS'])['DEFAULT_PRIOR'].transform(
-        lambda x: x.clip(1e-4) / x.clip(1e-4).sum())
+        lambda x: x.clip(1e-5) / x.clip(1e-5).sum())
     df.to_csv(prior_filename, sep='\t', index=False)

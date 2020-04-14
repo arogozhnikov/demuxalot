@@ -11,7 +11,7 @@ from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, decompress_b
 
 
 class ProbabilisticGenotypes:
-    def __init__(self, genotype_names: List[str], default_prior=0.1):
+    def __init__(self, genotype_names: List[str], default_prior=1.):
         """
         ProbabilisticGenotype represents our accumulated knowledge about SNPs (and SNPs only) for genotypes.
         Can aggregate information from GSA, our prior guesses and genotype information learnt from RNAseq.
