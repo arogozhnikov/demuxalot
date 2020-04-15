@@ -159,7 +159,7 @@ def detect_snps_positions(
 
     sorted_donors = np.unique([donor for donor in barcode2donor.values()])
 
-    with Parallel(n_jobs=joblib_n_jobs, verbose=11) as parallel:
+    with Parallel(n_jobs=joblib_n_jobs, verbose=11, pre_dispatch='all') as parallel:
         chrom_pos_importances_collection = parallel(
             delayed(detect_snps_for_chromosome)(
                 bamfile_location,
