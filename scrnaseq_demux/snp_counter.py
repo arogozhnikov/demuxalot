@@ -354,7 +354,7 @@ def prepare_counting_tasks(
 
     tasks = [task for complexity, task in sorted(tasks)]
     # for the exception of 20 last jobs, interweave complex and simple tasks
-    # this is to minimize peak memory usage, but make sure all cores are busy
+    # this is to minimize peak memory usage, but ensures all cores are busy
     tasks[:-20:2] = tasks[:-20:2][::-1]
     return tasks
 

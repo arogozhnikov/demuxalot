@@ -95,6 +95,10 @@ from scrnaseq_demux import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
 genotypes.add_vcf('path/to/genotypes.vcf')
 
+# TODO add genotype detection
+
+
+
 # Loading barcodes
 barcode_handler = BarcodeHandler.from_file('path/to/barcodes.csv')
 
@@ -117,7 +121,7 @@ for posterior_probs, additional_info in Demultiplexer.staged_genotype_learning(
 
 # import learnt genotypes and use those for demultiplexing
 genotypes_refined = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
-genotypes_refined.add_prior_betas('path/to/leant_genotypes_betas.csv')
+genotypes_refined.add_prior_betas('path/to/leant_genotypes_betas.csv', prior_strength=10.)
 
 likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
     snps,
@@ -127,5 +131,5 @@ likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
 )
 ```
 
-
+## Exporting VCF genotypes to betas (for faster processing)
    
