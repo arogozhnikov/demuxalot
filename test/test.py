@@ -95,7 +95,7 @@ class TestClass(unittest.TestCase):
         self.check_genotypes_are_identical(self.genotypes_used, loaded_genotypes)
 
     def count_snps(self):
-        with Timer('new_snp_counting'):
+        with Timer('snp_counting'):
             chromosome2compressed_snp_calls = count_snps(
                 bamfile_location=self.bamfile_location,
                 chromosome2positions=self.genotypes_used.get_chromosome2positions(),

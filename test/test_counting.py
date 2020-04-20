@@ -39,7 +39,7 @@ class TestClass(unittest.TestCase):
 
     def test_counting(self):
         chromosome2positions = self.genotypes_used.get_chromosome2positions()
-        with Timer('new_snp_counting'):
+        with Timer('snp_counting'):
             chromosome2compressed_snp_calls = count_snps(
                 bamfile_location=self.bamfile_location,
                 chromosome2positions=chromosome2positions,

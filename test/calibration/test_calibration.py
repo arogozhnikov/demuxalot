@@ -196,7 +196,7 @@ class TestClass(unittest.TestCase):
             variant_index2snp_index, variant_index2betas, p_genotype_clip=p_genotype_clip)
         assert np.isfinite(genotype_prob).all()
 
-        barcode_posterior_logits = np.zeros([len(barcode_handler.barcode2index), n_genotypes], dtype="float32")
+        barcode_posterior_logits = np.zeros([len(barcode_handler.ordered_barcodes), n_genotypes], dtype="float32")
 
         column_names = []
         for gindex, genotype in enumerate(genotypes.genotype_names):
@@ -207,12 +207,12 @@ class TestClass(unittest.TestCase):
 
         logits_df = pd.DataFrame(
             data=barcode_posterior_logits,
-            index=list(barcode_handler.barcode2index), columns=column_names,
+            index=list(barcode_handler.ordered_barcodes), columns=column_names,
         )
         logits_df.index.name = 'BARCODE'
         probs_df = pd.DataFrame(
             data=softmax(barcode_posterior_logits, axis=1),
-            index=list(barcode_handler.barcode2index), columns=column_names,
+            index=list(barcode_handler.ordered_barcodes), columns=column_names,
         )
         probs_df.index.name = 'BARCODE'
         return logits_df, probs_df
