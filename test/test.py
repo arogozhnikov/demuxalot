@@ -1,220 +1,210 @@
 import json
 import pprint
-from collections import defaultdict
+import unittest
 from pathlib import Path
 
-import joblib
 import numpy as np
-import pandas as pd
-import pysam
+from scipy.special import softmax
 
-# TODO get rid of pipeline dependency
-from pipeline.Stopwatch import Stopwatch
 from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
+from scrnaseq_demux.utils import Timer
 
 here = Path(__file__).parent
 
-with open(here / 'lane2guessed_donor.json') as f:
-    lane2inferred_genotypes = json.load(f)
 
-bamfile_location = str(here / 'composed_1_perlane_sorted.bam')
-bamfile = pysam.AlignmentFile(bamfile_location)
-barcodes_all_lanes = pd.read_csv(here / 'composed_barcodes_1.tsv', header=None)[0].values
+class TestClass(unittest.TestCase):
+    def setUp(self):
+        with open(here / 'calibration/lane2guessed_donor.json') as f:
+            lane2inferred_genotypes = json.load(f)
 
-with Stopwatch('barcodes'):
-    barcode_handler = BarcodeHandler(barcodes_all_lanes)
-    barcode2possible_genotypes = {barcode: lane2inferred_genotypes[barcode.split('_')[1]]
-                                  for barcode in barcodes_all_lanes
-                                  if barcode.split('_')[1] in lane2inferred_genotypes}
+        self.bamfile_location = str(here / 'composed_1_perlane_sorted.bam')
 
+        with Timer('barcodes'):
+            self.barcode_handler = BarcodeHandler.from_file(here / 'composed_barcodes_1.tsv')
 
-def filter_snps(snps, genotype_names):
-    strings = snps[genotype_names].sum(axis=1)
-    mask = strings.map(lambda x: '0' in x and '1' in x)
-    # no more than one undetermined SNP
-    mask &= (snps[genotype_names] == './.').sum(axis=1) <= 1
-    return snps[mask]
+        with Timer('construct genotypes from GSA'):
+            self.vcf_filename = here / 'system1_merged_v4_mini_cleared.vcf'
 
+            self.used_genotypes_names = list(np.unique(sum(lane2inferred_genotypes.values(), [])).tolist())
+            # genotypes_used = ProbabilisticGenotypes_old(self.used_genotypes_names)
+            genotypes_used = ProbabilisticGenotypes(self.used_genotypes_names)
+            genotypes_used.add_vcf(self.vcf_filename, prior_strength=100)
 
-with Stopwatch('construct genotypes from GSA'):
-    vcf_filename = here / 'system1_merged_v4_mini_cleared.vcf'
+        with Timer('update genotypes with new SNPs'):
+            # extend genotypes with added SNPs
+            # saving learnt genotypes to a separate file
+            self.prior_filename = here / 'new_snps.csv'
+            genotypes_used.add_prior_betas(self.prior_filename, prior_strength=10)
 
-    used_genotypes_names = list(np.unique(sum(lane2inferred_genotypes.values(), [])).tolist())
-    genotypes_used = ProbabilisticGenotypes(used_genotypes_names)
-    genotypes_used.add_vcf(vcf_filename, prior_strength=100)
+        self.genotypes_used = genotypes_used
+        self.chromosome2snp_calls = self.count_snps()
 
-with Stopwatch('update genotypes with new SNPs'):
-    # extend genotypes with added SNPs
-    # saving learnt genotypes to a separate file
-    chrom2snp_positions_and_stats = joblib.load(here / 'chrom2possible0basedpositions_based_on_donors.joblib.pkl')
-    df = defaultdict(list)
-    for chromosome, (snp_positions, snp_stats) in chrom2snp_positions_and_stats.items():
-        for snp_position, snp_stat in zip(snp_positions, snp_stats):
-            if (chromosome, snp_position) in genotypes_used.snips:
-                continue
+    @staticmethod
+    def check_genotypes_are_identical(genotypes1: ProbabilisticGenotypes, genotypes2: ProbabilisticGenotypes):
+        assert len(genotypes1.snp2snpid) == len(genotypes2.snp2snpid)
+        assert genotypes1.genotype_names == genotypes2.genotype_names
 
-            _, _, alt, ref = np.argsort(snp_stat)
-            alt_count, ref_count = snp_stat[alt], snp_stat[ref]
-            alt_count, ref_count = np.asarray([alt_count, ref_count]) / (alt_count + ref_count)
-            df['CHROM'].append(chromosome)
-            df['POS'].append(snp_position)
-            df['BASE'].append('ACGT'[ref])
-            df['DEFAULT_PRIOR'].append(ref_count)
+        assert genotypes1.n_variants == genotypes2.n_variants
 
-            df['CHROM'].append(chromosome)
-            df['POS'].append(snp_position)
-            df['BASE'].append('ACGT'[alt])
-            df['DEFAULT_PRIOR'].append(alt_count)
+        snp2sindex1, _beta_priors1 = genotypes1._generate_canonical_representation()
+        snp2sindex2, _beta_priors2 = genotypes2._generate_canonical_representation()
+        assert snp2sindex1 == snp2sindex2
+        assert np.allclose(_beta_priors1, _beta_priors2)
 
-    prior_filename = here / 'new_snips.csv'
-    pd.DataFrame(df).to_csv(prior_filename, sep='\t', index=False)
-    print(f'Added {len(df["CHROM"]) // 2} new snps in total')
-    genotypes_used.add_prior_betas(prior_filename, prior_strength=10)
+    def test_export_and_load_of_genotypes(self):
+        with Timer('check export'):
+            posterior_filename = here / '_temp_exported_prior.tsv'
+            self.genotypes_used.save_betas(posterior_filename)
 
-with Stopwatch('checking reverse order of addition'):
-    genotypes_trash = ProbabilisticGenotypes(used_genotypes_names)
-    genotypes_trash.add_prior_betas(prior_filename, prior_strength=10)
-    genotypes_trash.add_vcf(vcf_filename, prior_strength=100)
+        with Timer('check import'):
+            genotypes_loaded = ProbabilisticGenotypes(self.used_genotypes_names)
+            genotypes_loaded.add_prior_betas(posterior_filename, prior_strength=1.)
 
-with Stopwatch('check export'):
-    posterior_filename = here / '_temp_exported_prior.tsv'
-    genotypes_used.save_betas(posterior_filename)
+        with Timer('verifying agreement'):
+            self.check_genotypes_are_identical(self.genotypes_used, genotypes_loaded)
 
-with Stopwatch('check import'):
-    genotypes_used2 = ProbabilisticGenotypes(used_genotypes_names)
-    genotypes_used2.add_prior_betas(posterior_filename, prior_strength=1.)
+    def test_reverse_order_of_addition_to_genotypes(self):
+        genotypes_straight = ProbabilisticGenotypes(self.used_genotypes_names)
+        genotypes_straight.add_prior_betas(self.prior_filename, prior_strength=10)
+        genotypes_straight.add_vcf(self.vcf_filename, prior_strength=100)
 
-with Stopwatch('verifying agreement'):
-    assert len(genotypes_used.snips) == len(genotypes_used2.snips)
-    assert genotypes_used.genotype_names == genotypes_used2.genotype_names
-    for (chrom, pos), (ref, alt, priors) in genotypes_used.snips.items():
-        ref2, alt2, priors2 = genotypes_used2.snips[chrom, pos]
-        assert alt == alt2
-        assert ref == ref2
-        assert np.allclose(priors, priors2)
+        genotypes_reverse = ProbabilisticGenotypes(self.used_genotypes_names)
+        genotypes_reverse.add_prior_betas(self.prior_filename, prior_strength=10)
+        genotypes_reverse.add_vcf(self.vcf_filename, prior_strength=100)
 
-    snp2sindex1, _, _beta_priors1 = genotypes_used.generate_genotype_snp_beta_prior()
-    snp2sindex2, _, _beta_priors2 = genotypes_used2.generate_genotype_snp_beta_prior()
-    assert snp2sindex1 == snp2sindex2
-    assert np.allclose(_beta_priors1, _beta_priors2)
+        self.check_genotypes_are_identical(genotypes_straight, genotypes_reverse)
 
-with Stopwatch('new_snp_counting'):
-    chromosome2cbub2qual_and_snps = count_snps(
-        bamfile_location=bamfile_location,
-        chromosome2positions=genotypes_used.get_chromosome2positions(),
-        barcode_handler=barcode_handler,
-    )
+        kwargs = dict(
+            chromosome2compressed_snp_calls=self.chromosome2snp_calls,
+            barcode_handler=self.barcode_handler,
+            only_singlets=True,
+        )
 
-    counter = {
-        chromosome: len(cals) for chromosome, cals in chromosome2cbub2qual_and_snps.items()
-    }
-    pprint.pprint(counter)
+        posteriors1 = Demultiplexer.predict_posteriors(**kwargs, genotypes=genotypes_straight)
+        posteriors2 = Demultiplexer.predict_posteriors(**kwargs, genotypes=genotypes_reverse)
+        assert np.all(posteriors1[0] == posteriors2[0])
+        assert np.all(posteriors1[1] == posteriors2[1])
 
-assert counter == {
-    'GRCh38_______1': 3920,
-    'GRCh38_______10': 765,
-    'GRCh38_______11': 7687,
-    'GRCh38_______12': 1393,
-    'GRCh38_______13': 376,
-    'GRCh38_______14': 851,
-    'GRCh38_______15': 1261,
-    'GRCh38_______16': 1884,
-    'GRCh38_______17': 2838,
-    'GRCh38_______18': 124,
-    'GRCh38_______19': 5429,
-    'GRCh38_______2': 2167,
-    'GRCh38_______20': 1378,
-    'GRCh38_______21': 95,
-    'GRCh38_______22': 1765,
-    'GRCh38_______3': 2926,
-    'GRCh38_______4': 1011,
-    'GRCh38_______5': 740,
-    'GRCh38_______6': 2122,
-    'GRCh38_______7': 2306,
-    'GRCh38_______8': 2202,
-    'GRCh38_______9': 854,
-    'GRCh38_______MT': 24862,
-    'GRCh38_______X': 384,
-}
+    def test_exporting_and_loading_genotypes(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile() as temp:
+            self.genotypes_used.save_betas(temp.name)
+            loaded_genotypes = ProbabilisticGenotypes(genotype_names=self.genotypes_used.genotype_names,
+                                                      default_prior=self.genotypes_used.default_prior)
+            loaded_genotypes.add_prior_betas(temp.name, prior_strength=1.)
+        self.check_genotypes_are_identical(self.genotypes_used, loaded_genotypes)
 
-for chromosome, cbub2qual_and_snps in chromosome2cbub2qual_and_snps.items():
-    print(chromosome, len(cbub2qual_and_snps))
+    def count_snps(self):
+        with Timer('snp_counting'):
+            chromosome2compressed_snp_calls = count_snps(
+                bamfile_location=self.bamfile_location,
+                chromosome2positions=self.genotypes_used.get_chromosome2positions(),
+                barcode_handler=self.barcode_handler,
+            )
 
-with Stopwatch(f'demux initialization'):
-    trainable_demultiplexer = Demultiplexer(
-        chromosome2cbub2qual_and_snps,
-        barcode2possible_genotypes={barcode: used_genotypes_names for barcode in barcode_handler.barcode2index},
-        probabilistic_genotypes=genotypes_used,
-        barcode_handler=barcode_handler,
-    )
+        counter = {
+            chromosome: calls.n_molecules
+            for chromosome, calls in chromosome2compressed_snp_calls.items()
+        }
 
-with Stopwatch('demultiplexing'):
-    for barcode_posterior_probs_df, debug_info in trainable_demultiplexer.staged_genotype_learning(n_iterations=3):
-        print('one more iteration complete')
-        logits2, probs = trainable_demultiplexer.predict_posteriors(
-            debug_info['genotype_snp_posterior'],
-            chromosome2cbub2qual_and_snps,
-            barcode_handler, only_singlets=True)
-        logits = debug_info['barcode_logits']
-        assert np.allclose(np.sum(probs, axis=1), 1)
-        assert np.allclose(logits, logits2)
+        for chromosome, calls in chromosome2compressed_snp_calls.items():
+            assert len(calls.molecules) == calls.n_molecules
 
-with Stopwatch('checking doublets'):
-    args = (
-        debug_info['genotype_snp_posterior'],
-        chromosome2cbub2qual_and_snps,
-        barcode_handler,
-    )
-    logits_singlet, _ = trainable_demultiplexer.predict_posteriors(*args, only_singlets=True)
-    logits_doublet, _ = trainable_demultiplexer.predict_posteriors(*args, only_singlets=False)
-    assert np.allclose(logits_singlet, logits_doublet.loc[:, logits_singlet.columns])
+        pprint.pprint(counter)
+        assert counter == {
+            'GRCh38_______1': 3918,
+            'GRCh38_______10': 765,
+            'GRCh38_______11': 7688,
+            'GRCh38_______12': 1393,
+            'GRCh38_______13': 376,
+            'GRCh38_______14': 858,
+            'GRCh38_______15': 1261,
+            'GRCh38_______16': 1882,
+            'GRCh38_______17': 2838,
+            'GRCh38_______18': 124,
+            'GRCh38_______19': 5428,
+            'GRCh38_______2': 2171,
+            'GRCh38_______20': 1377,
+            'GRCh38_______21': 95,
+            'GRCh38_______22': 1764,
+            'GRCh38_______3': 2945,
+            'GRCh38_______4': 1011,
+            'GRCh38_______5': 739,
+            'GRCh38_______6': 2122,
+            'GRCh38_______7': 2306,
+            'GRCh38_______8': 2201,
+            'GRCh38_______9': 853,
+            'GRCh38_______MT': 24873,
+            'GRCh38_______X': 384,
+        }
 
-with Stopwatch('check demultiplexing for different stage'):
-    common_args = (chromosome2cbub2qual_and_snps, barcode_handler, True)
-    post1 = trainable_demultiplexer.predict_posteriors(
-        genotypes_trash.generate_genotype_snp_beta_prior()[-1], *common_args)
-    post2 = trainable_demultiplexer.predict_posteriors(genotypes_used, *common_args)
-    assert np.all(post1[0] == post2[0])
-    assert np.all(post1[1] == post2[1])
+        return chromosome2compressed_snp_calls
 
-print(list(np.max(logits, axis=0)))
+    def test_demultiplexing_singlets_vs_doublets(self):
+        with Timer('checking alignments of singlets and doublets'):
+            kwargs = dict(
+                chromosome2compressed_snp_calls=self.chromosome2snp_calls,
+                genotypes=self.genotypes_used,
+                barcode_handler=self.barcode_handler,
+            )
+            logits_singlet, prob_singlet = Demultiplexer.predict_posteriors(**kwargs, only_singlets=True)
+            logits_doublet, prob_doublet = Demultiplexer.predict_posteriors(**kwargs, only_singlets=False)
+            assert np.allclose(logits_singlet, logits_doublet.loc[:, logits_singlet.columns])
+            assert np.allclose(prob_singlet.sum(axis=1), 1, atol=1e-4), prob_singlet.sum(axis=1)
+            assert np.allclose(prob_doublet.sum(axis=1), 1, atol=1e-4), prob_doublet.sum(axis=1)
+            # checking that setting doublet prior to something small is identical to just singlets
+            logits_doublet_pseudo, prob_doublet_pseudo = Demultiplexer.predict_posteriors(
+                **kwargs, only_singlets=False, doublet_prior=1e-8)
+            print(prob_singlet / prob_doublet_pseudo.loc[:, prob_singlet.columns])
+            assert np.allclose(prob_singlet, prob_doublet_pseudo.loc[:, prob_singlet.columns], atol=1e-3)
 
-reference = [-4.1255603, -4.2695103, -9.513682, -3.824123, -4.157081, -4.3482676, -3.9152608, -8.900769, -4.4701805,
-             -3.8421426, -4.585875, -4.1683974, -3.307035, -4.4903097, -4.402192, -3.8523905, -3.9055922, -3.9764569,
-             -3.7411292, -3.964514, -3.770989]
+    def test_demultiplexing_agaisnt_historical_result(self):
+        with Timer('demultiplexing'):
+            for barcode_posterior_probs_df, debug_info in Demultiplexer.staged_genotype_learning(
+                    chromosome2compressed_snp_calls=self.chromosome2snp_calls,
+                    genotypes=self.genotypes_used,
+                    barcode_handler=self.barcode_handler,
+                    n_iterations=3):
+                print('one more iteration complete')
+                logits = debug_info['barcode_logits']
+                print('logits info', logits.min())
 
-assert np.allclose(np.max(logits, axis=0), reference)
+            mean_probs = softmax(logits, axis=1).mean(axis=0)
 
-with Stopwatch('demux initialization again'):
-    trainable_demultiplexer2 = Demultiplexer(
-        chromosome2cbub2qual_and_snps,
-        barcode2possible_genotypes={barcode: used_genotypes_names for barcode in barcode_handler.barcode2index},
-        barcode_handler=barcode_handler,
-        probabilistic_genotypes=genotypes_used2,
-    )
+            reference_mean_probs = \
+                [0.023656892, 0.038816728, 0.039463125, 0.010899138, 0.029516088, 0.08418094, 0.027043846, 0.048838142,
+                 0.110589385, 0.012225234, 0.0654298, 0.07042614, 0.081185535, 0.08959608, 0.09606744, 0.01548529,
+                 0.015876694, 0.045034245, 0.059479408, 0.023949377, 0.012240634]
 
-with Stopwatch('demultiplexing again and exporting difference'):
-    learnt_genotypes_filename = here / '_learnt_beta_contributions.csv'
-    for _, debug_info2 in trainable_demultiplexer2.staged_genotype_learning(
-            n_iterations=3, save_learnt_genotypes_to=str(learnt_genotypes_filename)):
-        print('one more iteration complete')
+            print('mean probs  [', ', '.join(str(x) for x in mean_probs), ']')
 
-assert np.allclose(debug_info['genotype_snp_posterior'], debug_info2['genotype_snp_posterior'])
+            # assert np.allclose(mean_probs, reference_mean_probs, atol=0.01)
 
-with Stopwatch('importing difference'):
-    genotypes_learnt = ProbabilisticGenotypes(used_genotypes_names)
-    genotypes_learnt.add_prior_betas(learnt_genotypes_filename, prior_strength=1.)
-    assert genotypes_learnt.generate_genotype_snp_beta_prior()[:2] == genotypes_used.generate_genotype_snp_beta_prior()[
-                                                                      :2]
-    _, _, _beta_prior = genotypes_learnt.generate_genotype_snp_beta_prior()
+        with Timer('demultiplexing again and exporting difference'):
+            learnt_genotypes_filename = here / '_learnt_beta_contributions.csv'
+            for _, debug_info2 in Demultiplexer.staged_genotype_learning(
+                    chromosome2compressed_snp_calls=self.chromosome2snp_calls,
+                    genotypes=self.genotypes_used,
+                    barcode_handler=self.barcode_handler,
+                    n_iterations=3,
+                    save_learnt_genotypes_to=str(learnt_genotypes_filename)):
+                print('one more iteration complete')
 
-    assert np.allclose(_beta_prior, debug_info['genotype_snp_posterior'])
+        # check that learnt genotypes are identical
+        assert np.allclose(debug_info['genotype_snp_posterior'], debug_info2['genotype_snp_posterior'])
 
-    logits3, _ = trainable_demultiplexer2.predict_posteriors(
-        _beta_prior,
-        chromosome2cbub2qual_and_snps,
-        barcode_handler=barcode_handler, only_singlets=True)
+        with Timer('importing difference'):
+            genotypes_learnt = ProbabilisticGenotypes(self.used_genotypes_names)
+            genotypes_learnt.add_prior_betas(learnt_genotypes_filename, prior_strength=1.)
 
-    assert np.allclose(logits2, logits3)
+            # checking snps are identical, but not checking betas
+            assert genotypes_learnt._generate_canonical_representation()[0] == \
+                   self.genotypes_used._generate_canonical_representation()[0]
 
-print('Yup, all is fine')
+            logits2, _ = Demultiplexer.predict_posteriors(
+                chromosome2compressed_snp_calls=self.chromosome2snp_calls,
+                genotypes=genotypes_learnt,
+                barcode_handler=self.barcode_handler,
+                only_singlets=True)
+
+            assert np.allclose(logits, logits2)
