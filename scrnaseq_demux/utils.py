@@ -56,7 +56,7 @@ class BarcodeHandler:
 
         assert len(set(barcodes)) == len(barcodes), "all passed barcodes should be unique"
         self.ordered_barcodes = list(sorted(barcodes))
-        self.barcode2index = {bc: i for i, bc in enumerate(barcodes)}
+        self.barcode2index = {bc: i for i, bc in enumerate(self.ordered_barcodes)}
 
     def get_barcode_index(self, read: pysam.AlignedRead):
         """ Returns None if barcode is not in the whitelist, otherwise a small integer """
