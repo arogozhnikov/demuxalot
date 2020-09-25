@@ -42,8 +42,9 @@ class BarcodeHandler:
         because strings take too much space
         :param barcodes: list of strings, each one is barcode (corresponds to barcode in cellranger)
         :param RG_tags: optional list of the same length, used when RG tag should be used as a part of barcode identity.
-          RG tag shows original file when reads are merged from multiple bam files into one, because .
-          This may be very handy when you merge several bamfiles (e.g. for reproducible unbiased training of genotypes)
+          RG tag shows original file when reads are merged from multiple bam files into one.
+          This is very handy when you merge several bamfiles (e.g. for reproducible unbiased training of genotypes).
+          Don't forget to pass '-r' as an argument to samtools merging.
         """
         assert not isinstance(barcodes, str), 'construct by passing list of possible barcodes'
         barcodes = list(barcodes)
