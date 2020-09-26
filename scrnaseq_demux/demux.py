@@ -7,7 +7,7 @@ import pysam
 from scipy.special import softmax
 
 from scrnaseq_demux.snp_counter import CompressedSNPCalls
-from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, decompress_base, Timer, compress_base
+from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, compress_base
 
 
 class ProbabilisticGenotypes:
@@ -38,7 +38,7 @@ class ProbabilisticGenotypes:
             self.variant_betas = np.concatenate(
                 [self.variant_betas, np.zeros_like(self.variant_betas) + self.default_prior], axis=0)
 
-    def add_vcf(self, vcf_file_name, prior_strength=100, verbose=False):
+    def add_vcf(self, vcf_file_name, prior_strength=100):
         """
         Add information from parsed VCF
         :param vcf_file_name: path to VCF file. Only diploid values are accepted (0/0, 0/1, 1/1, ./.).
@@ -81,7 +81,7 @@ class ProbabilisticGenotypes:
                 contribution[row, not_provided] = contribution[row, ~not_provided].mean()
             self.variant_betas[snp_ids] += contribution
         if n_skipped_snps > 0:
-            print('skipped', n_skipped_snps)
+            print('skipped', n_skipped_snps, 'SNVs')
 
     def add_prior_betas(self, prior_filename, *, prior_strength):
         """
@@ -165,15 +165,17 @@ class Demultiplexer:
     """
     Demultiplexer that can infer (learn) additional information about genotypes to achieve better quality.
 
-    There are two ways of running EM.
-    - one is to compute probability for each cb+ub, but then
+    There are two ways of regularizing EM algorithm.
+    - one is to compute probability for each molecule, but then
       - easier to compute posterior for different mixtures
       - hard to limit contribution of a single SNP (this was deciding after all)
-    - second is to compute contributions of SNPs
-      - in this case limiting contribution from a single cb+ub is hard, but it is limited by group size and
+    - second is to compute contributions of SNPs aggregated over all reads
+      - in this case limiting contribution from a single molecule is hard, but it is limited by group size and
         number of possible modifications (AS limit in terms of cellranger/STAR alignment)
-    Second one is used here.
+
+    Second one is used in this implementation.
     """
+    # contribution power is regularization to descrease 
     contribution_power = 2.
 
     @staticmethod
@@ -263,7 +265,7 @@ class Demultiplexer:
         return logits_df, probs_df
 
     @staticmethod
-    def compute_barcode_logits(genotype_names, calls, doublet_prior, genotype_prob, n_barcodes: int, n_genotypes,
+    def compute_barcode_logits(genotype_names, calls, doublet_prior, genotype_prob, n_barcodes: int, n_genotypes: int,
                                only_singlets):
         if only_singlets:
             barcode_posterior_logits = np.zeros([n_barcodes, n_genotypes], dtype="float32")
@@ -376,7 +378,7 @@ class Demultiplexer:
 
     @staticmethod
     def pack_calls(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
-                       genotypes: ProbabilisticGenotypes):
+                   genotypes: ProbabilisticGenotypes):
         chrom_pos_base2variant_index = genotypes.snp2snpid
         pos_base_chrom_variant = np.array(
             [(pos, compress_base(base), chrom, variant_index)
