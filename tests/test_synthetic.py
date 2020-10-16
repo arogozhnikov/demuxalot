@@ -1,3 +1,8 @@
+"""
+These are simple end-to-end tests starting from "BAM" and VCF or assignments.
+(all data is synthetic)
+"""
+
 from collections import defaultdict
 
 import pysam
@@ -99,12 +104,12 @@ def generate_genotypes(genotypes: List[Reference]) -> ProbabilisticGenotypes:
 
 
 def generate_bam_file(
-        n_genotypes=10,
+        n_genotypes=20,
         doublets_fraction=0.2,
         mutation_prob=0.01,  # for the sake of speed, real number is 10 times smaller
         read_length=100,
         filename='/tmp/test.bam',
-        n_barcodes=100,
+        n_barcodes=1000,
         n_reads_per_barcode=100,
 ):
     reference = Reference({'chr1': 1000, 'chr2': 1000, 'chr3': 1000})
