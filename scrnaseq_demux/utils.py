@@ -20,16 +20,12 @@ def hash_string(s):
 base_lookup = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 4}
 
 
-def compress_base(base):
+def compress_base(base: str) -> int:
     return base_lookup[base]
 
 
-def decompress_base(base_index):
+def decompress_base(base_index: int) -> str:
     return 'ACGTN'[base_index]
-
-
-for base, base_index in base_lookup.items():
-    assert decompress_base(compress_base(base)) == base
 
 
 def fast_np_add_at_1d(x, indices, weights):
@@ -44,7 +40,7 @@ class BarcodeHandler:
         :param RG_tags: optional list of the same length, used when RG tag should be used as a part of barcode identity.
           RG tag shows original file when reads are merged from multiple bam files into one.
           This is very handy when you merge several bamfiles (e.g. for reproducible unbiased training of genotypes).
-          Don't forget to pass '-r' as an argument to samtools merging.
+          Don't forget to pass '-r' as an argument to samtools merge.
         """
         assert not isinstance(barcodes, str), 'construct by passing list of possible barcodes'
         barcodes = list(barcodes)
@@ -58,6 +54,10 @@ class BarcodeHandler:
         assert len(set(barcodes)) == len(barcodes), "all passed barcodes should be unique"
         self.ordered_barcodes = list(sorted(barcodes))
         self.barcode2index = {bc: i for i, bc in enumerate(self.ordered_barcodes)}
+
+    @property
+    def n_barcodes(self):
+        return len(self.ordered_barcodes)
 
     def get_barcode_index(self, read: pysam.AlignedRead):
         """ Returns None if barcode is not in the whitelist, otherwise a small integer """
