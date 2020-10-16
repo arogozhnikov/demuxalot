@@ -95,11 +95,10 @@ from scrnaseq_demux import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
 genotypes.add_vcf('path/to/genotypes.vcf')
 
-# TODO add genotype detection
+# TODO add SNPs detection
 
 
-
-# Loading barcodes
+# Load barcodes
 barcode_handler = BarcodeHandler.from_file('path/to/barcodes.csv')
 
 snps = count_snps(
@@ -108,28 +107,35 @@ snps = count_snps(
     barcode_handler=barcode_handler, 
 )
 
-# Train genotypes and export 
-for posterior_probs, additional_info in Demultiplexer.staged_genotype_learning(
-    snps,
-    genotypes=genotypes,
-    barcode_handler=barcode_handler,
-    n_iterations=5, 
-    save_learnt_genotypes_to='path/to/leant_genotypes_betas.csv',
-):
-    # here you can track how probabilities change during training
-    print(posterior_probs.shape)
+# Infer refined genotypes 
+refined_genotypes, _posterior_probabilities = \
+    Demultiplexer.learn_genotypes(snps, genotypes=genotypes, n_iterations=5)
 
-# import learnt genotypes and use those for demultiplexing
-genotypes_refined = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
-genotypes_refined.add_prior_betas('path/to/leant_genotypes_betas.csv', prior_strength=10.)
-
+# Use learnt genotypes for demultiplexing
 likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
     snps,
-    genotypes=genotypes_refined,
+    genotypes=refined_genotypes,
     barcode_handler=barcode_handler,
     only_singlets=False,
 )
 ```
 
-## Exporting VCF genotypes to betas (for faster processing)
+## Saving/loading genotypes
    
+```python
+# You can always export learnt genotypes to be used later
+refined_genotypes.save_betas('learnt_genotypes.csv')
+refined_genotypes = ProbabilisticGenotypes(genotype_names= <list which genotypes to load>)
+refined_genotypes.add_prior_betas('learnt_genotypes.csv')
+```
+
+## Re-saving VCF genotypes with betas
+
+Generally makes sense to export VCF to internal format only when you plan to load it many times.
+Loading of internal format is much faster 
+
+```python
+genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
+genotypes.add_vcf('path/to/genotypes.vcf')
+genotypes.save_betas('learnt_genotypes.csv')
+```
