@@ -1,5 +1,7 @@
 from collections import defaultdict
-from typing import List, Dict
+from copy import deepcopy
+from typing import List, Dict, Tuple
+from warnings import warn
 
 import numpy as np
 import pandas as pd
@@ -26,12 +28,18 @@ class ProbabilisticGenotypes:
         self.genotype_names = list(genotype_names)
         assert (np.sort(self.genotype_names) == self.genotype_names).all(), 'please order genotype names'
 
-        self.n_variants = 0
-        self.variant_betas = np.zeros([32768, len(self.genotype_names)], 'float32') + self.default_prior
+        self.variant_betas = np.zeros([32768, self.n_genotypes], 'float32') + self.default_prior
 
     def __repr__(self):
-        return f'<Genotypes with {len(self.genotype_names)} genotypes: {self.genotype_names} ' \
-               f'and {len(self.snp2snpid)} SNVs >'
+        return f'<Genotypes with {len(self.snp2snpid)} SNVs and {self.n_genotypes} genotypes: \n{self.genotype_names}'
+
+    @property
+    def n_genotypes(self):
+        return len(self.genotype_names)
+
+    @property
+    def n_variants(self):
+        return len(self.snp2snpid)
 
     def extend_variants(self, n_samples=1):
         while n_samples + self.n_variants > len(self.variant_betas):
@@ -61,12 +69,11 @@ class ProbabilisticGenotypes:
                 variant = (snp.chrom, snp.pos - 1, allele)
                 if variant not in self.snp2snpid:
                     self.snp2snpid[variant] = self.n_variants
-                    self.n_variants += 1
                 snp_ids.append(self.snp2snpid[variant])
 
             assert len(set(snp_ids)) == len(snp_ids), (snp_ids, snp.chrom, snp.pos, snp.alleles)
 
-            contribution = np.zeros([len(snp_ids), len(self.genotype_names)], dtype='float32')
+            contribution = np.zeros([len(snp_ids), self.n_genotypes], dtype='float32')
             for donor_id, donor in enumerate(self.genotype_names):
                 called_values = snp.samples[donor]['GT']
                 for call in called_values:
@@ -107,7 +114,6 @@ class ProbabilisticGenotypes:
             if variant not in self.snp2snpid:
                 self.extend_variants(1)
                 self.snp2snpid[variant] = self.n_variants
-                self.n_variants += 1
             variant_indices.append(self.snp2snpid[variant])
 
         for donor_id, donor in enumerate(self.genotype_names):
@@ -140,10 +146,16 @@ class ProbabilisticGenotypes:
     def get_snp_positions_set(self) -> set:
         return {(chromosome, position) for chromosome, position, base in self.snp2snpid}
 
+    def _with_betas(self, external_betas: np.ndarray):
+        result: ProbabilisticGenotypes = deepcopy(self)
+        result.variant_betas = external_betas.copy()
+        return result
+
     def save_betas(self, path_or_buf, *, external_betas: np.ndarray = None):
         columns = defaultdict(list)
         betas = self.variant_betas[:self.n_variants]
         if external_betas is not None:
+            warn('external betas argument is deprecated')
             assert betas.shape == external_betas.shape
             assert betas.dtype == external_betas.dtype
             betas = external_betas
@@ -175,24 +187,63 @@ class Demultiplexer:
 
     Second one is used in this implementation.
     """
-    # contribution power is regularization to descrease 
+    # contribution power minimizes contribution
+    # from barcodes that don't have any good candidate donor
     contribution_power = 2.
 
     @staticmethod
-    def staged_genotype_learning(chromosome2compressed_snp_calls,
-                                 genotypes: ProbabilisticGenotypes,
-                                 barcode_handler: BarcodeHandler,
-                                 n_iterations=5,
-                                 p_genotype_clip=0.01,
-                                 use_doublets=False,
-                                 doublet_prior=0.35,
-                                 save_learnt_genotypes_to=None):
+    def learn_genotypes(chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
+                        genotypes: ProbabilisticGenotypes,
+                        barcode_handler: BarcodeHandler,
+                        n_iterations=5,
+                        p_genotype_clip=0.01,
+                        doublet_prior=0.,
+                        barcode_prior_logits: np.ndarray = None,
+                        ) -> Tuple[ProbabilisticGenotypes, pd.DataFrame]:
+        """
+        Learn genotypes starting from initial genotype guess
+        :param chromosome2compressed_snp_calls: output of snp calling utility
+        :param genotypes: initial genotypes (e.g. inferred from bead array or bulk rnaseq)
+        :param barcode_handler: barcode handler specifies which barcodes should be considered
+        :param n_iterations: number of EM iterations
+        :param p_genotype_clip: minimal probability assigned to polymorphism
+        :param doublet_prior: prior expectation of fraction of doublets,
+            setting to zero skips computation of doublets and helpful when number of clones is too large
+        :param barcode_prior_logits: optionally, one can start from assignment to possible clones
+        :return: learnt genotypes and barcode-to-donor assignments from the last iteration
+        """
+        *_, last_iteration_output = Demultiplexer.staged_genotype_learning(
+                chromosome2compressed_snp_calls=chromosome2compressed_snp_calls,
+                genotypes=genotypes,
+                barcode_handler=barcode_handler,
+                n_iterations=n_iterations,
+                p_genotype_clip=p_genotype_clip,
+                doublet_prior=doublet_prior,
+                barcode_prior_logits=barcode_prior_logits,
+        )
+        last_iteration_barcode_probs, debug_information = last_iteration_output
+        learnt_genotypes = genotypes._with_betas(debug_information['genotype_snp_posterior'])
+        return learnt_genotypes, last_iteration_barcode_probs
+
+    @staticmethod
+    def staged_genotype_learning(
+            chromosome2compressed_snp_calls: Dict[str, CompressedSNPCalls],
+            genotypes: ProbabilisticGenotypes,
+            barcode_handler: BarcodeHandler,
+            n_iterations=5,
+            p_genotype_clip=0.01,
+            doublet_prior=0.,
+            barcode_prior_logits: np.ndarray = None,
+    ):
+        assert doublet_prior >= 0
+        if barcode_prior_logits is not None:
+            assert barcode_prior_logits.shape == (barcode_handler.n_barcodes, genotypes.n_genotypes), \
+                'wrong shape of priors'
+
         variant_index2snp_index, variant_index2betas, _, calls = \
             Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
 
-        n_barcodes = len(barcode_handler.ordered_barcodes)
-        n_genotypes = len(genotypes.genotype_names)
-
+        n_genotypes = genotypes.n_genotypes
         genotype_snp_posterior = variant_index2betas.copy()
 
         for iteration in range(n_iterations):
@@ -201,8 +252,10 @@ class Demultiplexer:
 
             barcode_posterior_logits, columns_names = Demultiplexer.compute_barcode_logits(
                 genotypes.genotype_names, calls, doublet_prior=doublet_prior, genotype_prob=genotype_prob,
-                n_barcodes=n_barcodes, n_genotypes=n_genotypes, only_singlets=not use_doublets,
+                n_barcodes=barcode_handler.n_barcodes, n_genotypes=n_genotypes, only_singlets=doublet_prior == 0.,
             )
+            if iteration == 0 and barcode_prior_logits is not None:
+                barcode_posterior_logits += barcode_prior_logits
 
             barcode_posterior_probs = softmax(barcode_posterior_logits, axis=-1)
             barcode_posterior_probs_df = pd.DataFrame(
@@ -214,9 +267,6 @@ class Demultiplexer:
                 'snp_prior': variant_index2betas,
                 'genotype_snp_posterior': genotype_snp_posterior
             }
-            if (save_learnt_genotypes_to is not None) and (iteration == n_iterations - 1):
-                assert isinstance(save_learnt_genotypes_to, str)
-                genotypes.save_betas(save_learnt_genotypes_to, external_betas=genotype_snp_posterior)
             yield barcode_posterior_probs_df, debug_information
 
             genotype_snp_posterior = variant_index2betas.copy()
@@ -238,7 +288,7 @@ class Demultiplexer:
         variant_index2snp_index, variant_index2betas, _, calls = \
             Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
 
-        n_genotypes = len(genotypes.genotype_names)
+        n_genotypes = genotypes.n_genotypes
 
         genotype_prob = Demultiplexer._compute_probs_from_betas(
             variant_index2snp_index, variant_index2betas, p_genotype_clip=p_genotype_clip)
@@ -247,9 +297,9 @@ class Demultiplexer:
         barcode_posterior_logits, column_names = Demultiplexer.compute_barcode_logits(
             genotypes.genotype_names, calls,
             doublet_prior, genotype_prob,
-            n_barcodes=len(barcode_handler.ordered_barcodes),
+            n_barcodes=barcode_handler.n_barcodes,
             n_genotypes=n_genotypes,
-            only_singlets=only_singlets
+            only_singlets=only_singlets,
         )
 
         logits_df = pd.DataFrame(
@@ -337,7 +387,7 @@ class Demultiplexer:
         assert len(chrom_pos_base2variant_index) == len(variant_index2betas)
         assert np.allclose(np.sort(pos_base_chrom_variant['variant_index']), np.arange(len(pos_base_chrom_variant)))
         assert np.all(variant_index2snp_index >= 0)
-        assert np.all(variant_index2betas > 0), 'bad loaded genotypes, negative betas appeared'
+        assert np.all(variant_index2betas > 0), 'bad genotypes provided, negative betas appeared'
 
         molecule_calls = np.array(
             [(-1, -1, -1, -1., -1.)] * sum(calls.n_snp_calls for calls in chromosome2compressed_snp_calls.values()),
