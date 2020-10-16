@@ -56,9 +56,10 @@ class ChromosomeSNPLookup:
                 refe_position += l
                 read_position += l
             elif code in (2, 3):
-                # should we include deletion as snp?
+                # deletions
                 refe_position += l
             elif code in (1, 4, 5, 6):
+                # insertions and skips
                 read_position += l
             else:
                 raise NotImplementedError(f"cigar code unknown {code}")
@@ -66,7 +67,7 @@ class ChromosomeSNPLookup:
 
 
 def double_array(array):
-    # double array size while keeping original information and preserve dtype
+    # double array size while keeping original information and preserve dtype. Minimal implementation
     return np.concatenate([array, array], axis=0)
 
 
@@ -79,7 +80,7 @@ class CompressedSNPCalls:
         """
         # internal representation of molecules and calls is structured numpy arrays
         # numpy can't add elements dynamically so we do that manually.
-        # First elements of array are occupied, number of elements is kept separately
+        # First elements of array are occupied, number of elements is kept in counters
         self.n_molecules = 0
         self.molecules = np.array(
             [(-1, -1, -1.)] * start_molecule_size,
@@ -279,7 +280,7 @@ def count_snps(
     """
     Computes which molecules can provide information about SNPs
 
-    :param bamfile_location: bam file, local path. It's going to be extensively read in multiple threads
+    :param bamfile_location: local path to bam file. File is going to be extensively read in multiple threads
     :param chromosome2positions: which positions are of interest for each chromosome,
         dictionary mapping chromosome name to np.ndarray of SNP positions within chromosome
     :param barcode_handler: handler which picks
@@ -328,6 +329,10 @@ def prepare_counting_tasks(
         minimum_fragment_length_per_job: int = 5_000,
         minimum_overlap: int = 100,
 ):
+    """
+    Split calling of a file into subtasks.
+    Each subtask defined by genomic region and non-empty list of positions
+    """
     with pysam.AlignmentFile(bamfile_location) as f:
         chromosome2n_reads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
 
@@ -348,7 +353,8 @@ def prepare_counting_tasks(
                 start = max(0, min(positions_subset) - minimum_overlap)
                 stop = min(length, max(positions_subset) + minimum_overlap)
                 task = (chromosome, start, stop, positions_subset)
-                # very naive and strange heuristic for
+                # very naive and strange heuristic for how long each task will take
+                # needed to assign more weight to small regions with deep coverage and many SNPs
                 complexity = len(positions_subset) * chromosome2n_reads[chromosome] / length ** 0.5
                 tasks.append((-complexity, task))
 
