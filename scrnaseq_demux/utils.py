@@ -33,7 +33,7 @@ def fast_np_add_at_1d(x, indices, weights):
 
 
 class BarcodeHandler:
-    def __init__(self, barcodes, RG_tags=None):
+    def __init__(self, barcodes, RG_tags=None, tag="CB"):
         """Barcode handler is needed to compress barcodes to integers,
         because strings take too much space
         :param barcodes: list of strings, each one is barcode (corresponds to barcode in cellranger)
@@ -41,6 +41,7 @@ class BarcodeHandler:
           RG tag shows original file when reads are merged from multiple bam files into one.
           This is very handy when you merge several bamfiles (e.g. for reproducible unbiased training of genotypes).
           Don't forget to pass '-r' as an argument to samtools merge.
+        :param tag: tag in BAM-file that keeps (corrected) barcode. Default is 'CB' (from cellranger)
         """
         assert not isinstance(barcodes, str), 'construct by passing list of possible barcodes'
         barcodes = list(barcodes)
@@ -54,6 +55,7 @@ class BarcodeHandler:
         assert len(set(barcodes)) == len(barcodes), "all passed barcodes should be unique"
         self.ordered_barcodes = list(sorted(barcodes))
         self.barcode2index = {bc: i for i, bc in enumerate(self.ordered_barcodes)}
+        self.tag = tag
 
     @property
     def n_barcodes(self):
@@ -61,13 +63,13 @@ class BarcodeHandler:
 
     def get_barcode_index(self, read: pysam.AlignedRead):
         """ Returns None if barcode is not in the whitelist, otherwise a small integer """
-        if not read.has_tag("CB"):
+        if not read.has_tag(self.tag):
             return None
         if self.use_rg:
             # require RG tag to be available for each read
-            barcode = read.get_tag("CB"), read.get_tag('RG')
+            barcode = read.get_tag(self.tag), read.get_tag("RG")
         else:
-            barcode = read.get_tag("CB")
+            barcode = read.get_tag(self.tag)
         return self.barcode2index.get(barcode, None)
 
     @staticmethod
