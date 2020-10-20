@@ -14,6 +14,8 @@ from .snp_counter import count_call_variants_for_chromosome, count_snps, Compres
 def detect_snps_for_chromosome(
         bamfile_path,
         chromosome,
+        start,
+        stop,
         sorted_donors,
         barcode2donor: dict,
         discard_read,
@@ -26,37 +28,44 @@ def detect_snps_for_chromosome(
         minimum_fraction_of_ref_and_alt=0.98,
 ):
     # stage1. straightforward counting, to detect possible candidates for snp
-    with pysam.AlignmentFile(bamfile_path) as bamfile:
-        # size = 4 x positions (first axis enumerates (ACTG))
-        coverage = np.asarray(
-            bamfile.count_coverage(chromosome, read_callback=lambda read: not discard_read(read)),
-            dtype="int32"
-        )
-        total = coverage.sum(axis=0)
-        *_, alt, ref = np.sort(coverage, axis=0)
-        is_candidate = (ref + alt) > minimum_coverage
-        # prefer snps with only two alternatives
-        is_candidate &= (ref + alt) > minimum_fraction_of_ref_and_alt * total
-        is_candidate &= alt > minimum_alternative_coverage
-        is_candidate &= alt > ref * minimum_alternative_fraction
+    coverage = 0
+    bamfiles = [bamfile_path] if isinstance(bamfile_path, str) else list(bamfile_path.values())
+    for filename in bamfiles:
+        with pysam.AlignmentFile(filename) as bamfile:
+            # size = 4 x positions (first axis enumerates "ACTG"))
+            coverage = coverage + np.asarray(
+                bamfile.count_coverage(chromosome, start=start, stop=stop, read_callback=lambda read: not discard_read(read)),
+                dtype="int32"
+            )
 
-        candidate_positions = np.where(is_candidate)[0]
+    total = coverage.sum(axis=0)
+    *_, alt, ref = np.sort(coverage, axis=0)
+    is_candidate = (ref + alt) > minimum_coverage
+    # prefer snps with only two alternatives
+    is_candidate &= (ref + alt) > minimum_fraction_of_ref_and_alt * total
+    is_candidate &= alt > minimum_alternative_coverage
+    is_candidate &= alt > ref * minimum_alternative_fraction
 
-        if len(candidate_positions) > max_snp_candidates:
-            # if too many candidates (improbable), take ones with highest alternative count
-            candidate_positions = np.argsort(alt * is_candidate)[-max_snp_candidates:]
-            candidate_positions = np.sort(candidate_positions)
+    candidate_positions = np.where(is_candidate)[0]
+
+    if len(candidate_positions) > max_snp_candidates:
+        # if too many candidates (improbable), take ones with highest alternative count
+        candidate_positions = np.argsort(alt * is_candidate)[-max_snp_candidates:]
+        candidate_positions = np.sort(candidate_positions)
 
     # stage2. collect detailed counts about snp candidates
     # possible optimization - minimize amount of barcodes passed here to those have donor associated
-    _, compressed_snp_calls = count_call_variants_for_chromosome(
+    compressed_snp_calls = count_snps(
         bamfile_path,
-        chromosome=chromosome,
-        chromosome_snps_zero_based=candidate_positions,
+        chromosome2positions={chromosome: candidate_positions},
         barcode_handler=barcode_handler,
-        compute_p_read_misaligned=lambda read: 1e-4,
+        compute_p_misaligned=lambda read: 1e-4,
         discard_read=discard_read,
+        joblib_n_jobs=None, # we are already inside joblib job
     )
+    if len(compressed_snp_calls) == 0:
+        return []
+    compressed_snp_calls = compressed_snp_calls[chromosome]
     donor2dindex = {donor: dindex for dindex, donor in enumerate(sorted_donors)}
 
     position2donor2base2count = _count_snp_stats_for_donors(
@@ -114,7 +123,7 @@ def _count_snp_stats_for_donors(compressed_snp_calls: CompressedSNPCalls, barcod
 
 
 def detect_snps_positions(
-        bamfile_location,
+        bamfile_location: str,
         genotypes: ProbabilisticGenotypes,
         barcode_handler: BarcodeHandler,
         minimum_coverage: int,
@@ -128,9 +137,11 @@ def detect_snps_positions(
         joblib_n_jobs=-1,
         result_beta_prior_filename=None,
         ignore_known_snps=True,
+        max_fragment_step=10_000_000,
 ):
     """
-    Detects SNPs based on data
+    Detects SNPs based on data.
+    Starts from loosely known imprecise genotypes
     """
     # step1. complete dirty demultiplexing using known genotype
     snps = count_snps(
@@ -151,19 +162,22 @@ def detect_snps_positions(
     barcode2donor = posterior_probabilities[posterior_probabilities.max(axis=1).gt(0.8)].idxmax(axis=1).to_dict()
     donor_counts = Counter(barcode2donor.values())
     for donor in genotypes.genotype_names:
-        print('During inferring SNPs for', donor, 'will use', donor_counts[donor], 'barcodes')
+        print('During inference of SNPs for', donor, 'will use', donor_counts[donor], 'barcodes')
 
     # step2. collect SNPs using predictions from rough demultiplexing
-    with pysam.AlignmentFile(bamfile_location) as f:
-        chromosomes = [x.contig for x in f.get_index_statistics()]
+    filename = [bamfile_location] if isinstance(bamfile_location, str) else list(bamfile_location.values())[0]
+    with pysam.AlignmentFile(filename) as f:
+        chromosomes = [(x.contig, f.get_reference_length(x.contig)) for x in f.get_index_statistics()]
 
     sorted_donors = np.unique([donor for donor in barcode2donor.values()])
 
-    with Parallel(n_jobs=joblib_n_jobs, verbose=11, pre_dispatch='all') as parallel:
-        chrom_pos_importances_collection = parallel(
+    def create_tasks():
+        return [
             delayed(detect_snps_for_chromosome)(
                 bamfile_location,
                 chromosome=chromosome,
+                start=start,
+                stop=min(start + max_fragment_step, length),
                 barcode2donor=barcode2donor,
                 discard_read=discard_read,
                 sorted_donors=sorted_donors,
@@ -173,8 +187,13 @@ def detect_snps_positions(
                 barcode_handler=barcode_handler,
                 regularization=regularization,
             )
-            for chromosome in chromosomes
-        )
+            for chromosome, length in chromosomes
+            for start in range(0, length, max_fragment_step)
+        ]
+
+    with Parallel(n_jobs=joblib_n_jobs, verbose=11, pre_dispatch='all') as parallel:
+        chrom_pos_importances_collection = parallel(create_tasks())
+
     chrom_pos_importances = sum(chrom_pos_importances_collection, [])
     selected_snps = _select_top_snps(chrom_pos_importances, n_additional_best_snps, n_best_snps_per_donor)
     # looks like it should spit out vcf file or beta coefficients. Probably beta coefficients.
