@@ -59,7 +59,7 @@ class BarcodeHandler:
 
     @property
     def n_barcodes(self):
-        return len(self.ordered_barcodes)
+        return len(self.barcode2index)
 
     def get_barcode_index(self, read: pysam.AlignedRead):
         """ Returns None if barcode is not in the whitelist, otherwise a small integer """
@@ -79,6 +79,19 @@ class BarcodeHandler:
         """
         barcodes = pd.read_csv(barcodes_filename, header=None)[0].values
         return BarcodeHandler(barcodes)
+
+    def filter_to_rg_value(self, rg_value):
+        """ Create a copy of this handler with only barcodes specific to one original file described by RG tag """
+        assert self.use_rg
+        result = BarcodeHandler(self.barcode2index, tag=self.tag)
+        result.barcode2index = {
+            # replace inappropriate barcodes with dummy values to keep order
+            (barcode if rg == rg_value else index): index
+            for (barcode, rg), index in self.barcode2index.items()
+        }
+        result.ordered_barcodes = list(result.barcode2index)
+        result.use_rg = False
+        return result
 
 
 def read_vcf_to_header_and_pandas(vcf_filename):
