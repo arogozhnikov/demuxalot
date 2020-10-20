@@ -165,7 +165,7 @@ def detect_snps_positions(
         print('During inference of SNPs for', donor, 'will use', donor_counts[donor], 'barcodes')
 
     # step2. collect SNPs using predictions from rough demultiplexing
-    filename = [bamfile_location] if isinstance(bamfile_location, str) else list(bamfile_location.values())[0]
+    filename = bamfile_location if isinstance(bamfile_location, str) else list(bamfile_location.values())[0]
     with pysam.AlignmentFile(filename) as f:
         chromosomes = [(x.contig, f.get_reference_length(x.contig)) for x in f.get_index_statistics()]
 
