@@ -237,8 +237,8 @@ class Demultiplexer:
     ):
         assert doublet_prior >= 0
         if barcode_prior_logits is not None:
-            assert barcode_prior_logits.shape == (barcode_handler.n_barcodes, genotypes.n_genotypes), \
-                'wrong shape of priors'
+            n_options = genotypes.n_genotypes if doublet_prior == 0 else genotypes.n_genotypes * (genotypes.n_genotypes + 1) // 2
+            assert barcode_prior_logits.shape == (barcode_handler.n_barcodes, n_options), 'wrong shape of priors'
 
         variant_index2snp_index, variant_index2betas, _, calls = \
             Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
