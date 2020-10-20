@@ -294,11 +294,11 @@ def count_snps(
     :return: returns an object which stores information about molecules, their SNPs and barcodes,
         that can be used by demultiplexer
     """
-    jobs = prepare_counting_tasks(bamfile_location, chromosome2positions)
+    jobs = prepare_counting_tasks(bamfile_location, chromosome2positions, barcode_handler=barcode_handler)
     with joblib.Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity, pre_dispatch='all') as parallel:
         chromosome2compressed_snp_calls = parallel(
             joblib.delayed(count_call_variants_for_chromosome)(
-                bamfile_location,
+                bamfile,
                 chromosome,
                 positions,
                 start=start,
@@ -307,7 +307,7 @@ def count_snps(
                 compute_p_read_misaligned=compute_p_misaligned,
                 discard_read=discard_read,
             )
-            for chromosome, start, stop, positions in jobs
+            for bamfile, chromosome, start, stop, positions, barcode_handler in jobs
         )
     _chr2calls = defaultdict(list)
     for chromosome, calls in chromosome2compressed_snp_calls:
@@ -325,6 +325,7 @@ def count_snps(
 def prepare_counting_tasks(
         bamfile_location,
         chromosome2positions: Dict[str, np.ndarray],
+        barcode_handler: BarcodeHandler,
         n_reads_per_job: int = 10_000_000,
         minimum_fragment_length_per_job: int = 5_000,
         minimum_overlap: int = 100,
@@ -333,6 +334,22 @@ def prepare_counting_tasks(
     Split calling of a file into subtasks.
     Each subtask defined by genomic region and non-empty list of positions
     """
+    if isinstance(bamfile_location, dict):
+        rg2bamfile_location = bamfile_location
+        tasks = []
+        assert barcode_handler.use_rg, 'barcode handler should use RG tag'
+        for rg in set(rg for tag, rg in barcode_handler.barcode2index):
+            assert rg in rg2bamfile_location, f'{rg} has no matching path in bamfile_location parameter'
+            tasks.extend(prepare_counting_tasks(
+                rg2bamfile_location[rg],
+                chromosome2positions=chromosome2positions,
+                barcode_handler=barcode_handler.filter_to_rg_value(rg),
+                n_reads_per_job=n_reads_per_job,
+                minimum_fragment_length_per_job=minimum_fragment_length_per_job,
+                minimum_overlap=minimum_overlap,
+            ))
+        return tasks
+
     with pysam.AlignmentFile(bamfile_location) as f:
         chromosome2n_reads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
 
@@ -352,15 +369,12 @@ def prepare_counting_tasks(
                     continue
                 start = max(0, min(positions_subset) - minimum_overlap)
                 stop = min(length, max(positions_subset) + minimum_overlap)
-                task = (chromosome, start, stop, positions_subset)
+                task = (bamfile_location, chromosome, start, stop, positions_subset, barcode_handler)
                 # very naive and strange heuristic for how long each task will take
                 # needed to assign more weight to small regions with deep coverage and many SNPs
                 complexity = len(positions_subset) * chromosome2n_reads[chromosome] / length ** 0.5
                 tasks.append((-complexity, task))
 
+    # complex tasks first
     tasks = [task for complexity, task in sorted(tasks)]
-    # for the exception of 20 last jobs, interweave complex and simple tasks
-    # this is to minimize peak memory usage, but ensures all cores are busy
-    tasks[:-20:2] = tasks[:-20:2][::-1]
     return tasks
-
