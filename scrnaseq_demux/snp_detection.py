@@ -75,13 +75,13 @@ def detect_snps_for_chromosome(
     def importance_and_base_counts(counts):
         # counts : n_donors x 4
         # leaving two most important bases
-        left_bases = alt, ref = np.argsort(counts.sum(axis=0))[-2:]
+        top_bases = alt, ref = np.argsort(counts.sum(axis=0))[-2:]
         base_counts = {
             'ACGT'[ref]: counts[:, ref].sum(),
             'ACGT'[alt]: counts[:, alt].sum(),
         }
 
-        counts = counts[:, left_bases] + 1e-4
+        counts = counts[:, top_bases] + 1e-4
         # counts : n_donors x 2
         # how far each donor from average distribution and how confident we are about it?
         # 1 point = we are completely confident about one, and it's completely different from average
