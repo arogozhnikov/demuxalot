@@ -144,7 +144,8 @@ def compress_cbub_reads_group_to_snips(
         skip_complete_duplicates=True,
 ) -> Tuple[float, list]:
     """
-    Takes a group of reads and leaves only information about SNP positions
+    Takes a group of reads with identical CB+UB=UMI (assuming all reads came from the same molecule)
+    and leaves only information about SNP positions by aggregating bases across reads
     """
     p_group_misaligned = 1
     processed_positions = set()
