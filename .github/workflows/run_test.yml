@@ -3,7 +3,7 @@ name: Run tests and deploy
 on: push
 
 jobs:
-  ruun-tests:
+  run-my-tests:
     name: Run tests
     runs-on: ubuntu-18.04
     steps:
