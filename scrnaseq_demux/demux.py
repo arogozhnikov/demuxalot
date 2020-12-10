@@ -64,6 +64,10 @@ class ProbabilisticGenotypes:
             if len(set(alleles)) != len(alleles):
                 n_skipped_snps += 1
                 continue
+            if any(allele not in 'ACGT' for allele in alleles):
+                n_skipped_snps += 1
+                continue
+
             for allele in alleles:
                 # pysam enumerates starting from one, thus -1
                 variant = (snp.chrom, snp.pos - 1, allele)
