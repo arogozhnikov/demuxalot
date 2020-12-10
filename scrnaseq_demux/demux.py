@@ -128,6 +128,9 @@ class ProbabilisticGenotypes:
         for chromosome, position, base in self.snp2snpid:
             chromosome2positions[chromosome].append(position)
 
+        if len(chromosome2positions) == 0:
+            warn('Genotypes are empty. Did you forget to add vcf/betas?')
+
         return {
             chromosome: np.unique(np.asarray(positions, dtype=int))
             for chromosome, positions
