@@ -1,9 +1,9 @@
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pysam
-
 
 def hash_string(s):
     """
@@ -126,3 +126,8 @@ class Timer:
     def __exit__(self, *_args):
         self.time_taken = time.time() - self.start_time
         print("Timer {} completed in  {:.3f} seconds".format(self.name, self.time_taken))
+
+
+def as_str(filename):
+    assert isinstance(filename, (str, Path))
+    return str(filename)
