@@ -8,6 +8,7 @@ from joblib import Parallel, delayed
 from . import cellranger_specific
 from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
 from .snp_counter import count_call_variants_for_chromosome, count_snps, CompressedSNPCalls
+from .utils import as_str
 
 
 # possible optimization - this can process a fragment of chromosome
@@ -31,7 +32,7 @@ def detect_snps_for_chromosome(
     coverage = 0
     bamfiles = [bamfile_path] if isinstance(bamfile_path, str) else list(bamfile_path.values())
     for filename in bamfiles:
-        with pysam.AlignmentFile(filename) as bamfile:
+        with pysam.AlignmentFile(as_str(filename)) as bamfile:
             # size = 4 x positions (first axis enumerates "ACTG"))
             coverage = coverage + np.asarray(
                 bamfile.count_coverage(chromosome, start=start, stop=stop, read_callback=lambda read: not discard_read(read)),
@@ -166,7 +167,7 @@ def detect_snps_positions(
 
     # step2. collect SNPs using predictions from rough demultiplexing
     filename = bamfile_location if isinstance(bamfile_location, str) else list(bamfile_location.values())[0]
-    with pysam.AlignmentFile(filename) as f:
+    with pysam.AlignmentFile(as_str(filename)) as f:
         chromosomes = [(x.contig, f.get_reference_length(x.contig)) for x in f.get_index_statistics()]
 
     sorted_donors = np.unique([donor for donor in barcode2donor.values()])

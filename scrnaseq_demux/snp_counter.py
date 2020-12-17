@@ -5,8 +5,8 @@ import joblib
 import numpy as np
 import pysam
 
-from scrnaseq_demux.cellranger_specific import compute_p_misaligned, discard_read
-from scrnaseq_demux.utils import hash_string, BarcodeHandler, compress_base
+from .cellranger_specific import compute_p_misaligned, discard_read
+from .utils import hash_string, BarcodeHandler, compress_base, as_str
 
 
 class ChromosomeSNPLookup:
@@ -237,7 +237,7 @@ def count_call_variants_for_chromosome(
     cbub2position_and_reads = {}
     snp_lookup = ChromosomeSNPLookup(chromosome_snps_zero_based)
     if isinstance(bamfile_or_filename, str):
-        bamfile_or_filename = pysam.AlignmentFile(bamfile_or_filename)
+        bamfile_or_filename = pysam.AlignmentFile(as_str(bamfile_or_filename))
 
     for read in bamfile_or_filename.fetch(chromosome, start=start, stop=stop):
         curr_segment = read.pos // 1000
@@ -351,7 +351,7 @@ def prepare_counting_tasks(
             ))
         return tasks
 
-    with pysam.AlignmentFile(bamfile_location) as f:
+    with pysam.AlignmentFile(as_str(bamfile_location)) as f:
         chromosome2n_reads = {contig.contig: contig.mapped for contig in f.get_index_statistics()}
 
         tasks = []  # chromosome, start, stop, positions
