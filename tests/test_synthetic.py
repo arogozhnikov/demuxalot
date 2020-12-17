@@ -32,7 +32,7 @@ class Reference:
         }
         self.chromosome2length = chromosome2length
 
-    def generate_header(self):
+    def generate_header_for_bamfile(self):
         return {
             'HD': {'VN': '1.0'},
             'SQ': [dict(LN=l, SN=name) for name, l in self.chromosome2length.items()]
@@ -126,9 +126,9 @@ def generate_bam_file(
         barcode2correct_donors[random_str(10) + '-1'] = \
             tuple(np.random.randint(0, n_genotypes, size=1 + doublet))
 
-    with pysam.AlignmentFile(filename, "wb", header=reference.generate_header()) as f:
+    with pysam.AlignmentFile(filename, "wb", header=reference.generate_header_for_bamfile()) as f:
         for barcode, donors in barcode2correct_donors.items():
-            for read in range(n_reads_per_barcode):
+            for _ in range(n_reads_per_barcode):
                 donor = np.random.choice(donors)
                 read = genotypes[donor].generate_read(
                     read_length=read_length,
