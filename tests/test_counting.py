@@ -95,8 +95,6 @@ class TestClass(unittest.TestCase):
             for molecule_index, snp_position, base_index, p_base_wrong in calls.snp_calls:
                 cb, ub, p_misaligned = calls.molecules[molecule_index]
                 assert (chromosome, snp_position) in positions_set
-                # TODO return this check?
-                # assert decompress_base(base_index) in 'ACGT'
                 all_calls.append(
                     (chromosome, int(snp_position), int(base_index), float(p_base_wrong), float(p_misaligned)))
 
