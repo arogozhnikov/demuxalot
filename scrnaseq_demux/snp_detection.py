@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pysam
 from joblib import Parallel, delayed
+from pathlib import Path
 
 from . import cellranger_specific
 from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
@@ -30,7 +31,7 @@ def detect_snps_for_chromosome(
 ):
     # stage1. straightforward counting, to detect possible candidates for snp
     coverage = 0
-    bamfiles = [bamfile_path] if isinstance(bamfile_path, str) else list(bamfile_path.values())
+    bamfiles = [bamfile_path] if isinstance(bamfile_path, (str, Path)) else list(bamfile_path.values())
     for filename in bamfiles:
         with pysam.AlignmentFile(as_str(filename)) as bamfile:
             # size = 4 x positions (first axis enumerates "ACTG"))
@@ -166,7 +167,7 @@ def detect_snps_positions(
         print('During inference of SNPs for', donor, 'will use', donor_counts[donor], 'barcodes')
 
     # step2. collect SNPs using predictions from rough demultiplexing
-    filename = bamfile_location if isinstance(bamfile_location, str) else list(bamfile_location.values())[0]
+    filename = bamfile_location if isinstance(bamfile_location, (str, Path)) else list(bamfile_location.values())[0]
     with pysam.AlignmentFile(as_str(filename)) as f:
         chromosomes = [(x.contig, f.get_reference_length(x.contig)) for x in f.get_index_statistics()]
 

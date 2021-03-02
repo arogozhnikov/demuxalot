@@ -43,7 +43,7 @@ class BarcodeHandler:
           Don't forget to pass '-r' as an argument to samtools merge.
         :param tag: tag in BAM-file that keeps (corrected) barcode. Default is 'CB' (from cellranger)
         """
-        assert not isinstance(barcodes, str), 'construct by passing list of possible barcodes'
+        assert not isinstance(barcodes, (str, Path)), 'construct by passing list of possible barcodes'
         barcodes = list(barcodes)
         self.use_rg = False
         if RG_tags is not None:

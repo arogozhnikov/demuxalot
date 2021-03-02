@@ -4,6 +4,7 @@ from typing import Tuple, Dict, List
 import joblib
 import numpy as np
 import pysam
+from pathlib import Path
 
 from .cellranger_specific import compute_p_misaligned, discard_read
 from .utils import hash_string, BarcodeHandler, compress_base, as_str
@@ -236,7 +237,7 @@ def count_call_variants_for_chromosome(
     compressed_snp_calls = CompressedSNPCalls()
     cbub2position_and_reads = {}
     snp_lookup = ChromosomeSNPLookup(chromosome_snps_zero_based)
-    if isinstance(bamfile_or_filename, str):
+    if isinstance(bamfile_or_filename, (str, Path)):
         bamfile_or_filename = pysam.AlignmentFile(as_str(bamfile_or_filename))
 
     for read in bamfile_or_filename.fetch(chromosome, start=start, stop=stop):
