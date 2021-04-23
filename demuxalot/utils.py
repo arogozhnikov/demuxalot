@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
+
 def hash_string(s):
     """
     Used to compress UB (molecule barcodes) to group identical ones.
@@ -96,6 +97,7 @@ class BarcodeHandler:
 
 def read_vcf_to_header_and_pandas(vcf_filename):
     """
+    Not super-reliable, but quite efficient and convenient method to parse VCF files.
     :param vcf_filename: vcf filename
     :return: list of commented lines (VCF header), and dataframe with all SNPs.
         Positions in the output are 0-based
