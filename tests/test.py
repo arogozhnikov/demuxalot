@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 from scipy.special import softmax
 
-from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
-from scrnaseq_demux.utils import Timer
+from demuxalot import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
+from demuxalot.utils import Timer, compress_base, decompress_base
 
 here = Path(__file__).parent
 
@@ -38,6 +38,10 @@ class TestClass(unittest.TestCase):
 
         self.genotypes_used = genotypes_used
         self.chromosome2snp_calls = self.count_snps()
+
+    def test_base_compression(self):
+        for base in 'ACGTN':
+            assert decompress_base(compress_base(base)) == base
 
     @staticmethod
     def check_genotypes_are_identical(genotypes1: ProbabilisticGenotypes, genotypes2: ProbabilisticGenotypes):
@@ -181,22 +185,17 @@ class TestClass(unittest.TestCase):
             # assert np.allclose(mean_probs, reference_mean_probs, atol=0.01)
 
         with Timer('demultiplexing again and exporting difference'):
-            learnt_genotypes_filename = here / '_learnt_beta_contributions.csv'
-            for _, debug_info2 in Demultiplexer.staged_genotype_learning(
-                    chromosome2compressed_snp_calls=self.chromosome2snp_calls,
-                    genotypes=self.genotypes_used,
-                    barcode_handler=self.barcode_handler,
-                    n_iterations=3,
-                    save_learnt_genotypes_to=str(learnt_genotypes_filename)):
-                print('one more iteration complete')
+            genotypes_learnt, _last_iteration_probs = Demultiplexer.learn_genotypes(
+                chromosome2compressed_snp_calls=self.chromosome2snp_calls,
+                genotypes=self.genotypes_used,
+                barcode_handler=self.barcode_handler,
+                n_iterations=3,
+            )
 
         # check that learnt genotypes are identical
         assert np.allclose(debug_info['genotype_snp_posterior'], debug_info2['genotype_snp_posterior'])
 
         with Timer('importing difference'):
-            genotypes_learnt = ProbabilisticGenotypes(self.used_genotypes_names)
-            genotypes_learnt.add_prior_betas(learnt_genotypes_filename, prior_strength=1.)
-
             # checking snps are identical, but not checking betas
             assert genotypes_learnt._generate_canonical_representation()[0] == \
                    self.genotypes_used._generate_canonical_representation()[0]
@@ -208,3 +207,33 @@ class TestClass(unittest.TestCase):
                 only_singlets=True)
 
             assert np.allclose(logits, logits2)
+
+    def test_demultiplexing_for_illumina_vcf(self):
+        donor_names = [
+            '1_0',
+            '21_20',
+            '41_40',
+            '61_60',
+            '81_80',
+            '101_100',
+            '121_120',
+            '141_140',
+            '161_160',
+            '181_180',
+            '201_200',
+            '221_220',
+            '241_240',
+        ]
+        donor_names = list(np.sort(donor_names))
+        genotypes = ProbabilisticGenotypes(donor_names)
+        genotypes.add_vcf('/Users/axelr/projects/demux/gsa2vcf/export1_reformatted_sorted.vcf')
+
+        calls = count_snps(
+            self.bamfile_location,
+            chromosome2positions=genotypes.get_chromosome2positions(),
+            barcode_handler=self.barcode_handler,
+        )
+
+        logits_doublet_pseudo, prob_doublet_pseudo = Demultiplexer.predict_posteriors(
+            calls, genotypes, self.barcode_handler, only_singlets=True, doublet_prior=1e-8
+        )

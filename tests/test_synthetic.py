@@ -13,7 +13,7 @@ from copy import deepcopy
 from typing import List
 import unittest
 
-from scrnaseq_demux import count_snps, Demultiplexer, BarcodeHandler, ProbabilisticGenotypes
+from demuxalot import count_snps, Demultiplexer, BarcodeHandler, ProbabilisticGenotypes
 
 
 def random_array(length):

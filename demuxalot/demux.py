@@ -8,8 +8,8 @@ import pandas as pd
 import pysam
 from scipy.special import softmax
 
-from scrnaseq_demux.snp_counter import CompressedSNPCalls
-from scrnaseq_demux.utils import fast_np_add_at_1d, BarcodeHandler, compress_base
+from demuxalot.snp_counter import CompressedSNPCalls
+from demuxalot.utils import fast_np_add_at_1d, BarcodeHandler, compress_base
 
 
 class ProbabilisticGenotypes:

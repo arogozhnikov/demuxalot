@@ -4,8 +4,8 @@ from pathlib import Path
 
 import numpy as np
 
-from scrnaseq_demux import ProbabilisticGenotypes, count_snps, BarcodeHandler
-from scrnaseq_demux.utils import Timer
+from demuxalot import ProbabilisticGenotypes, count_snps, BarcodeHandler
+from demuxalot.utils import Timer
 from hashlib import md5
 
 here = Path(__file__).parent

@@ -1,4 +1,4 @@
-# scrnaseq_demux
+# Demuxalot
 
 Reliable demultiplexing for single-cell RNA sequencing that improves genotypes.
 
@@ -18,11 +18,11 @@ Typical approach to get genotype-specific mutations are
 - whole-genome sequencing (expensive, very good)
   - you have information about all (ok, almost all) the genotype, and it is unlikely that you need to refine it
   - so you just go straight to demultiplexing
-  - e.g. demuxlet solves this problem
+  - demuxlet solves this problem
 - [GSA](https://www.well.ox.ac.uk/ogc/wp-content/uploads/2017/06/GSA-inputation-design-information.pdf) (Global Screening Array, times cheaper, fits this purpose).
   - [video promo of GSA](https://www.youtube.com/watch?v=lVG04dAAyvY) by Illumina 
   - you get information about 50k to 650k most common SNVs, and that's only a fraction of useful information you could have
-  - this case is covered by `scrnaseq_demux` (this package)
+  - this case is covered by `demuxalot` (this package)
 
 ## Why is it worth refining genotypes? 
    
@@ -36,8 +36,8 @@ Around 20-30% of them would be specific for a genotype.
 
 ## What's different between this package and others?
 
-- much better handling of multiple reads coming from the same UMI
-  - `scrnaseq_demux` can efficiently combine information
+- much better handling of multiple reads coming from the same UMI (i.e. same transcript)
+  - `demuxalot` can efficiently combine information
   - this comes at the cost of significantly higher memory consumption
 - default settings are CellRanger-specific. Cellranger's and STAR's flags in BAM break common conventions, 
   - but you can still efficiently use those, you just need to provide alternative filtering callbacks  
@@ -53,14 +53,14 @@ Package is pip-installable.
 
 ```bash
 git clone <repo> 
-pip install scrnaseq-demux
+pip install ./demuxalot
 ```
 
 ## Running (simple scenario)
 Only using provided genotypes
 
 ```python
-from scrnaseq_demux import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
+from demux_paper import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
 
 # Loading genotypes
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
@@ -89,7 +89,7 @@ likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
 Refinement of known genotypes
 
 ```python
-from scrnaseq_demux import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
+from demuxalot import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
 
 # Loading genotypes
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])

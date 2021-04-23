@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 from orgalorg.rnaseq.demultiplexing.demultiplexing import compute_qualities
 
-from scrnaseq_demux import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
-from scrnaseq_demux.snp_counter import CompressedSNPCalls
+from demuxalot import ProbabilisticGenotypes, Demultiplexer, count_snps, BarcodeHandler
+from demuxalot.snp_counter import CompressedSNPCalls
 
 here = Path(__file__).parent
 
@@ -184,19 +184,19 @@ class TestClass(unittest.TestCase):
             compute_calls,
             p_genotype_clip=0.01,
     ):
-        from scrnaseq_demux.demux import fast_np_add_at_1d, softmax
+        from demuxalot.demux import fast_np_add_at_1d, softmax
         variant_index2snp_index, variant_index2betas, molecule_calls, barcode_calls = \
             Demultiplexer.pack_calls(chromosome2compressed_snp_calls, genotypes)
 
         calls = compute_calls(molecule_calls, barcode_calls)
 
-        n_genotypes = len(genotypes.genotype_names)
+        n_genotypes = genotypes.n_genotypes
 
         genotype_prob = Demultiplexer._compute_probs_from_betas(
             variant_index2snp_index, variant_index2betas, p_genotype_clip=p_genotype_clip)
         assert np.isfinite(genotype_prob).all()
 
-        barcode_posterior_logits = np.zeros([len(barcode_handler.ordered_barcodes), n_genotypes], dtype="float32")
+        barcode_posterior_logits = np.zeros([barcode_handler.n_barcodes, n_genotypes], dtype="float32")
 
         column_names = []
         for gindex, genotype in enumerate(genotypes.genotype_names):
