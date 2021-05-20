@@ -1,15 +1,21 @@
+<p align="center">
+<img width="500" alt="demuxalot_logo_small" src="https://user-images.githubusercontent.com/6318811/118947887-a261da00-b90c-11eb-8932-a66e6d2caa1f.png">
+</p>
+ 
 # Demuxalot
 
-Reliable demultiplexing for single-cell RNA sequencing that improves genotypes.
+Reliable and efficient idenfitication of genotypes for individual cells 
+for single-cell RNA sequencing that refines the knowledge about genotypes from the data.
 
 ## Background
 
 During single-cell RNA-sequencing (scRnaSeq) we pool cells from different donors and process them together.
 
-- Con: we don't know which cell comes from which organoid
-- Pro: all cells come through the same pipeline, so there no organoid-specific batch effects
+- Con: we don't know cell origin
+- Pro: all cells come through the same pipeline, so prep variation effects are cancelled out automatically
 
-Demultiplexing solves con: it guesses which cells come from which organoid by matching reads coming from cell against genotypes.
+Demultiplexing step that demuxalot completes solves the con: 
+it guesses which cells come from which organoid by matching reads coming from cell against genotypes.
 
 ## Known genotypes and refined genotypes
 
@@ -18,32 +24,29 @@ Typical approach to get genotype-specific mutations are
 - whole-genome sequencing (expensive, very good)
   - you have information about all (ok, almost all) the genotype, and it is unlikely that you need to refine it
   - so you just go straight to demultiplexing
-  - demuxlet solves this problem
-- [GSA](https://www.well.ox.ac.uk/ogc/wp-content/uploads/2017/06/GSA-inputation-design-information.pdf) (Global Screening Array, times cheaper, fits this purpose).
-  - [video promo of GSA](https://www.youtube.com/watch?v=lVG04dAAyvY) by Illumina 
-  - you get information about 50k to 650k most common SNVs, and that's only a fraction of useful information you could have
+  - demuxlet solves this case
+- Bead arrays (aka SNP arrays aka DNA microarrays) are super cheap and practically more relevant
+  - you get information about 50k to 650k most common SNPs, and that's only a small fraction, but you also pay very little
   - this case is covered by `demuxalot` (this package)
+  - [video promo by Illumina](https://www.youtube.com/watch?v=lVG04dAAyvY) of their technology
 
 ## Why is it worth refining genotypes? 
    
-GSA provides you up to 650k (as of 2020) positions in the genome.
-Around 20-30% of them would be specific for a genotype.
+SNP array provides up to ~650k (as of 2021) positions in the genome.
+Around 20-30% of them would be specific for a genotype (i.e. deviate from majority).
 
-- Each genotype has around 10 times more SNV (single nucleotide variations)
-- However most of SNVs can't contribute to demultiplexing
-  - because scRnaSeq consists of reads that are <700 basepairs apart from poly-A tail  
-  - this also implies that we only need to learn genotypic information about these positions 
+- Each genotype has around 10 times more SNV (single nucleotide variations) that are not captured by array
+- However most of SNVs can't contribute to demultiplexing because only specific positions would appear in data (especially in 3'-scrnaseq)
 
-## What's different between this package and others?
+## What's special power of demuxalot?
 
 - much better handling of multiple reads coming from the same UMI (i.e. same transcript)
-  - `demuxalot` can efficiently combine information
-  - this comes at the cost of significantly higher memory consumption
-- default settings are CellRanger-specific. Cellranger's and STAR's flags in BAM break common conventions, 
-  - but you can still efficiently use those, you just need to provide alternative filtering callbacks  
-- ability to refine genotypes. without failing 
+  - `demuxalot` efficiently combines information from multiple reads with same UMI and cross-checks it
+- default settings are CellRanger-specific (that is - optimized for 10X pipeline). Cellranger's and STAR's flags in BAM break some common conventions, 
+  but we can still efficiently use them (by using filtering callbacks)  
+- ability to refine genotypes. without failing and diverging
   - Vireo is a tool that was created with similar purposes. But it either diverges or does not learn better genotypes
-- optimized variant calling (compared to `CellSNP`). It also wins `demuxlet` due to multiprocessing
+- optimized variant calling. It's also faster than `demuxlet` due to multiprocessing
 - this is not a command-line tool! 
   - You will write python code, this gives you full control and flexibility of demultiplexing.
 
@@ -60,7 +63,7 @@ pip install ./demuxalot
 Only using provided genotypes
 
 ```python
-from demux_paper import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
+from demuxalot import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
 
 # Loading genotypes
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
