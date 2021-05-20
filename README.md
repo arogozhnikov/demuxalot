@@ -5,19 +5,22 @@
 # Demuxalot
 
 Reliable and efficient idenfitication of genotypes for individual cells 
-for single-cell RNA sequencing that refines the knowledge about genotypes from the data.
+in RNA sequencing that refines the knowledge about genotypes from the data.
+
+Demuxalot fears not facing lots of genotypes.
 
 ## Background
 
 During single-cell RNA-sequencing (scRnaSeq) we pool cells from different donors and process them together.
+Herophilus uses scRnaSeq to study cells in organoids at scale.
 
 - Con: we don't know cell origin
-- Pro: all cells come through the same pipeline, so prep variation effects are cancelled out automatically
+- Pro: all cells come through the same pipeline, so preparation/biological variation effects are cancelled out automatically. Also it's much cheaper!
 
 Demultiplexing step that demuxalot completes solves the con: 
 it guesses which cells come from which organoid by matching reads coming from cell against genotypes.
 
-## Known genotypes and refined genotypes
+## Known genotypes and refined genotypes: the tale of two scenarios
 
 Typical approach to get genotype-specific mutations are 
  
