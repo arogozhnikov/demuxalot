@@ -1,5 +1,4 @@
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -136,55 +135,3 @@ def as_str(filename):
     return str(filename)
 
 
-plots_folder = "/data/plots/"
-
-
-@contextmanager
-def mpl_subplots(
-        filename: str,
-        show=True,
-        nrows=1,
-        ncols=1,
-        sharex=False,
-        sharey=False,
-        nb_dpi: float = 100,
-        save_dpi=300,
-        facecolor="white",
-        **kwargs,
-):
-    """
-        Creates subplots. Usage:
-        >>> with notebook.mpl_subplots("DEG") as (fig, ax):
-        >>>     # plotting goes here
-        Afterwards png and svg are saved to s3 folder corresponding to notebook (and immeditely uploaded to s3).
-        Pngs are saved in higher resolution compared to displayed in a notebook.
-        Path in s3 is printed to have reference in the notebook where to look for an image.
-
-        :param filename: e.g. "DEG", no need for full path or extension
-        :param show: show in notebook? Figures are always saved; but you may skip rendering in notebook.
-        :param nb_dpi: dpi for showing in notebook
-        :param save_dpi: dpi for saving in S3
-
-        all other parameters are identical to plt.subplots
-        """
-    assert " " not in filename, f"Better choose a name without spaces {filename}"
-    from matplotlib import pyplot as plt
-
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, sharex=sharex, sharey=sharey, dpi=nb_dpi, facecolor=facecolor, **kwargs
-    )
-    fig: plt.Figure = fig
-    yield fig, axes
-    fig.tight_layout()
-
-    local_path_png = Path(f'{plots_folder}/{filename}.png')
-    local_path_png.parent.mkdir(exist_ok=True)
-    fig.savefig(local_path_png, bbox_inches="tight", dpi=save_dpi)
-    local_path_svg = local_path_png.with_suffix('.svg')
-    print(f'saved to \n{local_path_png}\n{local_path_svg}')
-    fig.savefig(local_path_svg, bbox_inches="tight")
-    if show:
-        from IPython.display import display
-        display(fig)
-
-    plt.close(fig)
