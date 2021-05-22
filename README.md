@@ -8,18 +8,20 @@
 Reliable and efficient idenfitication of genotypes for individual cells 
 in RNA sequencing that refines the knowledge about genotypes from the data.
 
-Demuxalot fears not facing lots of genotypes.
+Demuxalot is fast and optimized to work with lots of genotypes.
 
 ## Background
 
 During single-cell RNA-sequencing (scRnaSeq) we pool cells from different donors and process them together.
-Herophilus uses scRnaSeq to study cells in organoids at scale.
 
+- Pro: all cells come through the same pipeline, so preparation/biological variation effects are cancelled out from analysis automatically. 
+  Also experiments are much cheaper!
 - Con: we don't know cell origin
-- Pro: all cells come through the same pipeline, so preparation/biological variation effects are cancelled out automatically. Also it's much cheaper!
 
 Demultiplexing step that demuxalot completes solves the con: 
-it guesses which cells come from which organoid by matching reads coming from cell against genotypes.
+it guesses genotype of each cell by matching reads coming from cell against genotypes.
+
+Herophilus uses scRnaSeq to study cells in organoids with multiple genetic backgrounds at scale.
 
 ## Known genotypes and refined genotypes: the tale of two scenarios
 
@@ -32,7 +34,7 @@ Typical approach to get genotype-specific mutations are
 - Bead arrays (aka SNP arrays aka DNA microarrays) are super cheap and practically more relevant
   - you get information about 50k to 650k most common SNPs, and that's only a small fraction, but you also pay very little
   - this case is covered by `demuxalot` (this package)
-  - [video promo by Illumina](https://www.youtube.com/watch?v=lVG04dAAyvY) of their technology
+  - [Illumina's video](https://www.youtube.com/watch?v=lVG04dAAyvY) about their technology
 
 ## Why is it worth refining genotypes? 
    
@@ -51,8 +53,8 @@ Around 20-30% of them would be specific for a genotype (i.e. deviate from majori
 - ability to refine genotypes. without failing and diverging
   - Vireo is a tool that was created with similar purposes. But it either diverges or does not learn better genotypes
 - optimized variant calling. It's also faster than `demuxlet` due to multiprocessing
-- this is not a command-line tool! 
-  - You will write python code, this gives you full control and flexibility of demultiplexing.
+- this is not a command-line tool, and not meant to be 
+  - write python code, this gives full control and flexibility of demultiplexing
 
 ## Installation
 
