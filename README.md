@@ -2,7 +2,8 @@
 <img width="500" alt="demuxalot_logo_small" src="https://user-images.githubusercontent.com/6318811/118947887-a261da00-b90c-11eb-8932-a66e6d2caa1f.png">
 </p>
  
-# Demuxalot
+[![Run tests and deploy](https://github.com/herophilus/demuxalot/actions/workflows/run_test.yml/badge.svg)](https://github.com/herophilus/demuxalot/actions/workflows/run_test.yml)
+# Demuxalot 
 
 Reliable and efficient idenfitication of genotypes for individual cells 
 in RNA sequencing that refines the knowledge about genotypes from the data.
