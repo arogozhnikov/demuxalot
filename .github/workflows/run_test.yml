@@ -18,3 +18,5 @@ jobs:
         python -m pip install .
     - name: Run pytest
       run: python -m pytest -s tests
+    - name: Run example
+      run: cd examples && python 1-plain_demultiplexing.py
