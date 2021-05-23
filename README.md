@@ -59,11 +59,18 @@ Around 20-30% of them would be specific for a genotype (i.e. deviate from majori
 ## Installation
 
 Package is pip-installable. Requires python >= 3.6
-
 ```bash
-git clone <repo> 
-pip install ./demuxalot
+pip install demuxalot
 ```
+
+Developer installation:
+```bash
+git clone https://github.com/herophilus/demuxalot
+cd demuxalot && pip install -e .
+```
+
+Here are some common scenarios and how they are implemented in demuxalot.
+Also visit `examples/` folder
 
 ## Running (simple scenario)
 Only using provided genotypes
