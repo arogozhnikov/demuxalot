@@ -79,12 +79,12 @@ class Reference:
 def generate_genotypes(genotypes: List[Reference]) -> ProbabilisticGenotypes:
     chr_pos2donor2base = defaultdict(dict)
     for genotype_id, genotype in enumerate(genotypes):
-        genotype_name = f'{genotype_id:02}'
+        genotype_name = f'Donor{genotype_id + 1:02}'
         for chr, seq in genotype.chromosome2sequence.items():
             for pos, base in enumerate(seq):
                 chr_pos2donor2base[chr, pos][genotype_name] = base
 
-    result = ProbabilisticGenotypes([f'{i:02}' for i, _ in enumerate(genotypes)])
+    result = ProbabilisticGenotypes([f'Donor{genotype_id + 1:02}' for genotype_id, _ in enumerate(genotypes)])
 
     chrom_pos_base2snp_id = {}
     counts = np.zeros([100_000, len(genotypes)], dtype='float32') + 0.5
@@ -148,7 +148,7 @@ def compute_loss(barcode2correct_donor, barcode2probs):
     probs = barcode2probs * 0
     for barcode, correct_donors in barcode2correct_donor.items():
         for donor in correct_donors:
-            donor = f'{donor:02}'
+            donor = f'Donor{donor + 1:02}'
             probs.loc[barcode, donor] = barcode2probs.loc[barcode, donor]
     p = probs.sum(axis=1)
     return - np.log(p.clip(1e-4)).mean()
