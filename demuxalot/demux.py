@@ -15,13 +15,13 @@ from demuxalot.utils import fast_np_add_at_1d, BarcodeHandler, compress_base
 class ProbabilisticGenotypes:
     def __init__(self, genotype_names: List[str], default_prior=1.):
         """
-        ProbabilisticGenotype represents our accumulated knowledge about SNPs (and SNPs only) for genotypes.
-        Can aggregate information from GSA, our prior guesses and genotype information learnt from RNAseq.
-        Genotype names can't be changed once object is created.
-        Class doesn't handle more than one SNP at position (examples are A/T and A/C at the same position),
-        so only the first received SNP for position is kept.
+        ProbabilisticGenotypes represents our accumulated knowledge about SNPs for selected genotypes.
+        Can aggregate information from GSA/WGS, our prior guesses and genotype information learnt from RNAseq.
+        Genotype names can't be changed/extended once the object is created.
+        Class can handle more than two options per genomic position.
         Genotype information is always accumulated, not overwritten.
-        Information is stored as betas (akin to coefficients in beta distribution).
+        Information is stored as betas (parameters of Dirichlet distribution,
+        akin to coefficients in beta distribution).
         """
         self.default_prior = default_prior
         self.snp2snpid = {}  # chrom, pos, base -> index in variant_betas
@@ -42,6 +42,7 @@ class ProbabilisticGenotypes:
         return len(self.snp2snpid)
 
     def extend_variants(self, n_samples=1):
+        # pre-allocation of space for new variants
         while n_samples + self.n_variants > len(self.variant_betas):
             self.variant_betas = np.concatenate(
                 [self.variant_betas, np.zeros_like(self.variant_betas) + self.default_prior], axis=0)
@@ -154,11 +155,13 @@ class ProbabilisticGenotypes:
         return {(chromosome, position) for chromosome, position, base in self.snp2snpid}
 
     def _with_betas(self, external_betas: np.ndarray):
+        """ Return copy of genotypes with updated beta weights """
         result: ProbabilisticGenotypes = deepcopy(self)
         result.variant_betas = external_betas.copy()
         return result
 
     def save_betas(self, path_or_buf, *, external_betas: np.ndarray = None):
+        """ Save learnt genotypes in the form of beta contributions, can be used later. """
         columns = defaultdict(list)
         betas = self.variant_betas[:self.n_variants]
         if external_betas is not None:
