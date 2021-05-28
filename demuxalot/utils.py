@@ -1,4 +1,5 @@
 import time
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +94,16 @@ class BarcodeHandler:
         result.ordered_barcodes = list(result.barcode2index)
         result.use_rg = False
         return result
+
+    def __repr__(self):
+        if not self.use_rg:
+            return f'<BarcodeHandler with {self.n_barcodes} barcodes>'
+        else:
+            rg_stats = Counter(rg for barcode, rg in self.barcode2index)
+            stats = ''
+            for rg_code, count in rg_stats.most_common():
+                stats += f'{rg_code}: {count} \n'
+            return f'<BarcodeHandler with {self.n_barcodes} barcodes. Number of barcodes for RG codes: {rg_stats}>'
 
 
 def read_vcf_to_header_and_pandas(vcf_filename):
