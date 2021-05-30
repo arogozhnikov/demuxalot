@@ -10,6 +10,8 @@ in RNA sequencing that refines the knowledge about genotypes from the data.
 
 Demuxalot is fast and optimized to work with lots of genotypes.
 
+Preprint [is available at biorxiv.](https://www.biorxiv.org/content/10.1101/2021.05.22.443646v2)
+
 ## Background
 
 During single-cell RNA-sequencing (scRnaSeq) we pool cells from different donors and process them together.
