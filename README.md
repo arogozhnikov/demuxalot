@@ -25,6 +25,14 @@ it guesses genotype of each cell by matching reads coming from cell against geno
 
 Herophilus uses scRnaSeq to study cells in organoids with multiple genetic backgrounds at scale.
 
+## Comparisons
+
+Demuxalot shows high reliability, data efficiency and speed. Below is a banchmark on PMBC data with 32 donors from [preprint](https://www.biorxiv.org/content/10.1101/2021.05.22.443646v2)
+
+<img width="1434" alt="Screen Shot 2021-06-03 at 6 03 12 PM" src="https://user-images.githubusercontent.com/6318811/120730293-07cdd300-c496-11eb-8a9c-62c8b8cf9847.png">
+
+
+
 ## Known genotypes and refined genotypes: the tale of two scenarios
 
 Typical approach to get genotype-specific mutations are 
