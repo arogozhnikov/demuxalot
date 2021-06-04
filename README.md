@@ -3,6 +3,7 @@
 </p>
  
 [![Run tests and deploy](https://github.com/herophilus/demuxalot/actions/workflows/run_test.yml/badge.svg)](https://github.com/herophilus/demuxalot/actions/workflows/run_test.yml)
+<img src="./.github/python_badge.svg">
 # Demuxalot 
 
 Reliable and efficient idenfitication of genotypes for individual cells 
