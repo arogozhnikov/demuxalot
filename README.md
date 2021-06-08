@@ -19,16 +19,18 @@ During single-cell RNA-sequencing (scRnaSeq) we pool cells from different donors
 
 - Pro: all cells come through the same pipeline, so preparation/biological variation effects are cancelled out from analysis automatically. 
   Also experiments are much cheaper!
-- Con: we don't know cell origin
+- Con: we don't know cell origin, everything is mixed!
 
-Demultiplexing step that demuxalot completes solves the con: 
-it guesses genotype of each cell by matching reads coming from cell against genotypes.
+Demuxalot solves the con: 
+it guesses genotype of each cell by matching reads coming from cell against genotypes. 
+This is called *demuxltiplexing*.
 
 Herophilus uses scRnaSeq to study cells in organoids with multiple genetic backgrounds at scale.
 
 ## Comparisons
 
-Demuxalot shows high reliability, data efficiency and speed. Below is a banchmark on PMBC data with 32 donors from [preprint](https://www.biorxiv.org/content/10.1101/2021.05.22.443646v2)
+Demuxalot shows high reliability, data efficiency and speed. 
+Below is a benchmark on PMBC data with 32 donors from [preprint](https://www.biorxiv.org/content/10.1101/2021.05.22.443646v2)
 
 <img width="1434" alt="Screen Shot 2021-06-03 at 6 03 12 PM" src="https://user-images.githubusercontent.com/6318811/120730293-07cdd300-c496-11eb-8a9c-62c8b8cf9847.png">
 
@@ -39,7 +41,7 @@ Demuxalot shows high reliability, data efficiency and speed. Below is a banchmar
 Typical approach to get genotype-specific mutations are 
  
 - whole-genome sequencing (expensive, very good)
-  - you have information about all (ok, almost all) the genotype, and it is unlikely that you need to refine it
+  - you have information about all (ok, >90%) the genotype, and it is unlikely that you need to refine it
   - so you just go straight to demultiplexing
   - demuxlet solves this case
 - Bead arrays (aka SNP arrays aka DNA microarrays) are super cheap and practically more relevant
