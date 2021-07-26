@@ -107,10 +107,14 @@ class ProbabilisticGenotypes:
             assert column in prior_knowledge.columns
         gt_names_in_prior = [column for column in prior_knowledge.columns if column not in tech_columns]
         print('Provided prior information about genotypes:', gt_names_in_prior)
-        for genotype in self.genotype_names:
-            if genotype not in gt_names_in_prior:
-                print(f'no information for genotype {genotype}, filling with default')
-                prior_knowledge[genotype] = prior_knowledge['DEFAULT_PRIOR']
+
+        genotypes_not_provided = [
+            genotype for genotype in self.genotype_names if genotype not in gt_names_in_prior
+        ]
+        print(f'No information for genotypes: {genotypes_not_provided}')
+
+        for genotype in genotypes_not_provided:
+            prior_knowledge[genotype] = prior_knowledge['DEFAULT_PRIOR']
 
         prior_knowledge[self.genotype_names] *= prior_strength
 
@@ -181,6 +185,9 @@ class ProbabilisticGenotypes:
                 columns[donor].append(beta)
 
         pd.DataFrame(columns).to_csv(path_or_buf, sep='\t', index=False)
+
+    def clone(self):
+        return deepcopy(self)
 
 
 class Demultiplexer:
