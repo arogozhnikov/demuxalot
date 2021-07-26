@@ -1,10 +1,12 @@
 import time
 from collections import Counter
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import pandas as pd
 import pysam
+import urllib.request
 
 
 def hash_string(s):
@@ -146,3 +148,56 @@ def as_str(filename):
     return str(filename)
 
 
+def download_file(url, local_filename) -> str:
+    """ Utility used only in examples """
+    if Path(local_filename).exists():
+        print(f'file {local_filename} already exists locally')
+    else:
+        Path(local_filename).parent.mkdir(exist_ok=True, parents=True)
+        urllib.request.urlretrieve(url, local_filename)
+        print(f'downloaded to {local_filename}')
+    return local_filename
+
+
+def summarize_counted_SNPs(snp_counts: Dict[str, 'CompressedSNPCalls']):
+    """
+    helper function to show number of calls/transcripts available for each barcode
+    """
+    records = []
+    barcode2number_of_calls = Counter()
+    barcode2number_of_transcripts = Counter()
+
+    for chromosome, calls in snp_counts.items():
+        records.append(dict(
+            chromosome=chromosome,
+            n_molecules=calls.n_molecules,
+            n_snp_calls=calls.n_snp_calls,
+        ))
+
+        barcode2number_of_transcripts.update(Counter(calls.molecules['compressed_cb']))
+        barcodes = calls.molecules['compressed_cb'][calls.snp_calls['molecule_index']]
+        barcode2number_of_calls.update(Counter(barcodes))
+
+    from matplotlib import pyplot as plt
+    fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=[12, 5])
+
+    def truncate_at_perc(x, percentile=99.5):
+        x = np.asarray(list(x))
+        return x.clip(0, np.percentile(x, percentile))
+
+    ax1.hist(
+        truncate_at_perc(barcode2number_of_calls.values()),
+        histtype='step', bins=20,
+    )
+    ax1.set_ylabel('barcodes')
+    ax1.set_xlabel('SNP calls per droplet')
+
+    ax2.hist(
+        truncate_at_perc(barcode2number_of_transcripts.values()),
+        histtype='step', bins=20,
+    )
+    ax2.set_ylabel('number of barcodes')
+    ax2.set_xlabel('transcripts per droplet')
+    fig.show()
+
+    return pd.DataFrame(records).sort_values('chromosome').set_index('chromosome')
