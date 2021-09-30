@@ -160,9 +160,12 @@ class MyTest(unittest.TestCase):
         cls.filename, cls.prob_genotypes, cls.barcode2correct_donor = generate_bam_file()
 
     def test_demultiplex_start_from_genotypes(self):
+        """
+        Testing quality against different amount of prior informatin about genotypes
+        """
         bam_filename, genotypes, barcode2correct_donor = self.filename, self.prob_genotypes, self.barcode2correct_donor
         barcode_handler = BarcodeHandler(list(barcode2correct_donor))
-        demuxer = Demultiplexer()
+
         calls = count_snps(
             bam_filename,
             chromosome2positions=genotypes.get_chromosome2positions(),
@@ -174,17 +177,23 @@ class MyTest(unittest.TestCase):
             ng = deepcopy(genotypes)
             ng.variant_betas[np.random.random(ng.n_variants) < noise_percent, :] = 1
             noised_genotypes = ng
-            learnt_genotypes, barcode2donor_probs = demuxer.learn_genotypes(
-                calls, noised_genotypes, barcode_handler=barcode_handler)
-            loss = compute_loss(barcode2correct_donor, barcode2donor_probs)
-            noise_percent2loss[noise_percent] = loss
+            _logits, barcode2donor_probs = Demultiplexer.predict_posteriors(
+                calls, noised_genotypes, barcode_handler=barcode_handler, only_singlets=True)
+            loss_no_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
+            result = [loss_no_learning]
+            for Demultiplexer.use_call_counts in [False, True]:
+                learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
+                    calls, noised_genotypes, barcode_handler=barcode_handler)
+                loss_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
+                result.append(loss_learning)
+
+            noise_percent2loss[noise_percent] = result
         print(noise_percent2loss)
-        assert noise_percent2loss[1.0] > noise_percent2loss[0.0]
+        assert noise_percent2loss[1.0][1] > noise_percent2loss[0.0][1]
 
     def demultiplex_start_from_assignment(self):
         bam_filename, genotypes, barcode2correct_donor = self.filename, self.prob_genotypes, self.barcode2correct_donor
         barcode_handler = BarcodeHandler(list(barcode2correct_donor))
-        demuxer = Demultiplexer()
         calls = count_snps(
             bam_filename,
             chromosome2positions=genotypes.get_chromosome2positions(),
@@ -194,7 +203,7 @@ class MyTest(unittest.TestCase):
         noised_genotypes.variant_betas[:] = 1
 
         # dry tun to generate pd.DataFrame with correct assignments
-        _learnt_genotypes, barcode2donor_probs = demuxer.learn_genotypes(
+        _learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
             calls, noised_genotypes, barcode_handler=barcode_handler)
 
         labelling_p = np.random.random(size=len(barcode2correct_donor))
@@ -206,7 +215,7 @@ class MyTest(unittest.TestCase):
                     [correct_donor] = correct_donors
                     barcode2donor_logits.loc[barcode, str(correct_donor)] += 100.
 
-            _learnt_genotypes, barcode2donor_probs = demuxer.learn_genotypes(
+            _learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
                 calls, noised_genotypes, barcode_handler=barcode_handler,
                 barcode_prior_logits=barcode2donor_logits.values)
 
