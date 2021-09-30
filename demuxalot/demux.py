@@ -28,7 +28,7 @@ class ProbabilisticGenotypes:
         self.genotype_names = list(genotype_names)
         assert (np.sort(self.genotype_names) == self.genotype_names).all(), 'please order genotype names'
 
-        self.variant_betas = np.zeros([32768, self.n_genotypes], 'float32') + self.default_prior
+        self.variant_betas: np.ndarray = np.zeros([32768, self.n_genotypes], 'float32') + self.default_prior
 
     def __repr__(self):
         return f'<Genotypes with {len(self.snp2snpid)} SNVs and {self.n_genotypes} genotypes: \n{self.genotype_names}'
@@ -331,6 +331,40 @@ class Demultiplexer:
         probs_df.index.name = 'BARCODE'
         return logits_df, probs_df
 
+
+    # @staticmethod
+    # def observation_probability_dirichletmultinomial(p_base_wrong, beta, total_beta, n_calls):
+    #     from scipy.special import gammaln, betaln
+    #     log_p_zero_counts = gammaln(total_beta) \
+    #                         - gammaln(n_calls + total_beta) \
+    #                         + gammaln(n_calls + total_beta - beta ) \
+    #                         - gammaln(total_beta - beta)
+    #     log_p_zero_counts_2 = betaln(beta, n_calls + total_beta - beta) - betaln(beta, total_beta - beta)
+    #     print(log_p_zero_counts)
+    #     print(log_p_zero_counts_2)
+    #     return p_base_wrong.clip(1e-4) + (1 - p_base_wrong) * np.exp(log_p_zero_counts)
+
+    use_call_counts = True
+    @staticmethod
+    def observation_probability(p_base_wrong, p, n_calls):
+        if Demultiplexer.use_call_counts:
+            p_zero_calls = (1 - p).clip(0, 1) ** n_calls
+            result = p_base_wrong.clip(1e-5) + (1 - p_base_wrong) * (1 - p_zero_calls)
+            if not np.all(result > 0):
+                mask = ~(result > 0)
+                mask = np.where(mask)[0][:20]
+                print(
+                    p_zero_calls[mask],
+                    p_base_wrong[mask],
+                    p[mask],
+                    n_calls[mask],
+                )
+            assert np.all(result > 0)
+            return result
+        else:
+            return p_base_wrong.clip(1e-4) + (1 - p_base_wrong) * p
+
+
     @staticmethod
     def compute_barcode_logits(genotype_names, calls, doublet_prior, genotype_prob, n_barcodes: int, n_genotypes: int,
                                only_singlets):
@@ -341,7 +375,12 @@ class Demultiplexer:
         column_names = []
         for gindex, genotype in enumerate(genotype_names):
             p = genotype_prob[calls['variant_id'], gindex]
-            log_penalties = np.log(p * (1 - calls['p_base_wrong']) + calls['p_base_wrong'].clip(1e-4))
+
+            log_penalties = np.log(Demultiplexer.observation_probability(
+                calls['p_base_wrong'],
+                p=p,
+                n_calls=calls['n_calls'],
+            ))
             fast_np_add_at_1d(barcode_posterior_logits[:, gindex], calls['compressed_cb'], log_penalties)
             column_names += [genotype]
         if not only_singlets:
@@ -358,7 +397,11 @@ class Demultiplexer:
                         p1 = genotype_prob[calls['variant_id'], gindex1]
                         p2 = genotype_prob[calls['variant_id'], gindex2]
                         p = (p1 + p2) * 0.5
-                        log_penalties = np.log(p * (1 - calls['p_base_wrong']) + calls['p_base_wrong'].clip(1e-4))
+                        log_penalties = np.log(Demultiplexer.observation_probability(
+                            calls['p_base_wrong'],
+                            p=p,
+                            n_calls=calls['n_calls'],
+                        ))
                         fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], calls['compressed_cb'],
                                           log_penalties)
                         barcode_posterior_logits[:, len(column_names)] += doublet_logit_bonus
@@ -375,14 +418,23 @@ class Demultiplexer:
         return probs.clip(p_genotype_clip, 1 - p_genotype_clip)
 
     @staticmethod
-    def molecule_calls2barcode_calls(molecule_calls):
+    def molecule_calls2barcode_calls(molecule_calls, variant_index2snp_index):
         barcode_calls_without_p, indices = np.unique(molecule_calls[['variant_id', 'compressed_cb']],
                                                      return_inverse=True)
         p_base_wrong = np.ones(len(barcode_calls_without_p), dtype='float32')
         np.multiply.at(p_base_wrong, indices, molecule_calls['p_base_wrong'])
+        # int16 sounds madly redundant
+        molecule_snp_id = variant_index2snp_index[molecule_calls['variant_id']]
+        _, snp_barcode_id, n_duplicates = np.unique(
+            molecule_snp_id + molecule_calls['compressed_cb'] * (molecule_snp_id.max() + 1),
+            return_inverse=True, return_counts=True,
+        )
+        n_calls = np.zeros(len(barcode_calls_without_p), dtype='int16')
+        n_calls[indices] = n_duplicates[snp_barcode_id].clip(0, 1000).astype('int16')
+
         return np.rec.fromarrays(
-            [barcode_calls_without_p['variant_id'], barcode_calls_without_p['compressed_cb'], p_base_wrong],
-            names=['variant_id', 'compressed_cb', 'p_base_wrong']
+            [barcode_calls_without_p['variant_id'], barcode_calls_without_p['compressed_cb'], p_base_wrong, n_calls],
+            names=['variant_id', 'compressed_cb', 'p_base_wrong', 'n_calls']
         )
 
     @staticmethod
@@ -424,7 +476,7 @@ class Demultiplexer:
                 continue
             index = lookup[['snp_position', 'base_index']]
             searched = variant_calls[['snp_position', 'base_index']]
-            # clipping fights being out of bounds (output may be len(index))
+            # clipping prevents out of bounds (output may be len(index))
             variant_id = np.searchsorted(index[['snp_position', 'base_index']], searched).clip(0, len(index) - 1)
             variant_id = np.where(index[variant_id] == searched, lookup['variant_index'][variant_id], -1)
 
@@ -442,5 +494,5 @@ class Demultiplexer:
         # filtering from those calls that did not match any snp
         molecule_calls = molecule_calls[molecule_calls['variant_id'] != -1]
 
-        barcode_calls = Demultiplexer.molecule_calls2barcode_calls(molecule_calls)
+        barcode_calls = Demultiplexer.molecule_calls2barcode_calls(molecule_calls, variant_index2snp_index)
         return variant_index2snp_index, variant_index2betas, molecule_calls, barcode_calls
