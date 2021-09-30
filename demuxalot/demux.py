@@ -331,38 +331,29 @@ class Demultiplexer:
         probs_df.index.name = 'BARCODE'
         return logits_df, probs_df
 
-
-    # @staticmethod
-    # def observation_probability_dirichletmultinomial(p_base_wrong, beta, total_beta, n_calls):
-    #     from scipy.special import gammaln, betaln
-    #     log_p_zero_counts = gammaln(total_beta) \
-    #                         - gammaln(n_calls + total_beta) \
-    #                         + gammaln(n_calls + total_beta - beta ) \
-    #                         - gammaln(total_beta - beta)
-    #     log_p_zero_counts_2 = betaln(beta, n_calls + total_beta - beta) - betaln(beta, total_beta - beta)
-    #     print(log_p_zero_counts)
-    #     print(log_p_zero_counts_2)
-    #     return p_base_wrong.clip(1e-4) + (1 - p_base_wrong) * np.exp(log_p_zero_counts)
-
     use_call_counts = True
     @staticmethod
-    def observation_probability(p_base_wrong, p, n_calls):
+    def log_observation_probability(p_called_base, calls):
+        p_base_wrong = calls['p_base_wrong']
+        n_calls = calls['n_calls']
+
         if Demultiplexer.use_call_counts:
-            p_zero_calls = (1 - p).clip(0, 1) ** n_calls
-            result = p_base_wrong.clip(1e-5) + (1 - p_base_wrong) * (1 - p_zero_calls)
-            if not np.all(result > 0):
-                mask = ~(result > 0)
+            p_zero_calls = (1 - p_called_base).clip(0, 1) ** n_calls
+            result_prob = p_base_wrong.clip(1e-5) + (1 - p_base_wrong) * (1 - p_zero_calls)
+            if not np.all(result_prob > 0):
+                mask = ~(result_prob > 0)
                 mask = np.where(mask)[0][:20]
                 print(
                     p_zero_calls[mask],
                     p_base_wrong[mask],
-                    p[mask],
+                    p_called_base[mask],
                     n_calls[mask],
                 )
-            assert np.all(result > 0)
-            return result
+            assert np.all(result_prob > 0)
+            return np.log(result_prob)
         else:
-            return p_base_wrong.clip(1e-4) + (1 - p_base_wrong) * p
+            result_prob = p_base_wrong.clip(1e-4) + (1 - p_base_wrong) * p_called_base
+            return np.log(result_prob)
 
 
     @staticmethod
@@ -376,11 +367,9 @@ class Demultiplexer:
         for gindex, genotype in enumerate(genotype_names):
             p = genotype_prob[calls['variant_id'], gindex]
 
-            log_penalties = np.log(Demultiplexer.observation_probability(
-                calls['p_base_wrong'],
-                p=p,
-                n_calls=calls['n_calls'],
-            ))
+            log_penalties = Demultiplexer.log_observation_probability(
+                p_called_base=p, calls=calls,
+            )
             fast_np_add_at_1d(barcode_posterior_logits[:, gindex], calls['compressed_cb'], log_penalties)
             column_names += [genotype]
         if not only_singlets:
@@ -397,11 +386,9 @@ class Demultiplexer:
                         p1 = genotype_prob[calls['variant_id'], gindex1]
                         p2 = genotype_prob[calls['variant_id'], gindex2]
                         p = (p1 + p2) * 0.5
-                        log_penalties = np.log(Demultiplexer.observation_probability(
-                            calls['p_base_wrong'],
-                            p=p,
-                            n_calls=calls['n_calls'],
-                        ))
+                        log_penalties = Demultiplexer.log_observation_probability(
+                            p_called_base=p, calls=calls,
+                        )
                         fast_np_add_at_1d(barcode_posterior_logits[:, len(column_names)], calls['compressed_cb'],
                                           log_penalties)
                         barcode_posterior_logits[:, len(column_names)] += doublet_logit_bonus
