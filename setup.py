@@ -14,10 +14,11 @@ setup(
     ],
     keywords='genotype learning, single cell RNA sequencing, demultiplexing, bayesian modelling',
     install_requires=[
-        'pysam',
+        'pysam',  # reads BAM files (alignment)
         'scipy',
         'numpy',
-        'joblib',
+        'joblib',  # multiprocessing in separate processes
         'pandas',
+        'pyarrow',  # required to read and write parquet files
     ],
 )
