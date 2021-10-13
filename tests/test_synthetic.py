@@ -195,8 +195,12 @@ class MyTest(unittest.TestCase):
         print(pd.DataFrame(noise_percent2loss))
         assert noise_percent2loss[1.0]['call_counts=False'] > noise_percent2loss[0.0]['call_counts=False']
 
-    def demultiplex_start_from_assignment(self):
-        bam_filename, genotypes, barcode2correct_donor = self.filename, self.prob_genotypes, self.barcode2correct_donor
+    def test_demultiplex_start_from_assignment(self, labeled_fractions=(0.01, 0.05, 0.1, 0.2, 0.5)):
+        """
+        In this test we label some of barcodes as attributed to particular donors,
+        genotypes of the other barcodes should be guessed starting from this information
+        """
+        bam_filename, genotypes, barcode2correct_donor = self.filename, self.prob_genotypes, self.barcode2donor_names
         barcode_handler = BarcodeHandler(list(barcode2correct_donor))
         calls = count_snps(
             bam_filename,
@@ -213,10 +217,11 @@ class MyTest(unittest.TestCase):
         labelling_p = np.random.random(size=len(barcode2correct_donor))
         barcode2donor_logits: pd.DataFrame = barcode2donor_probs * 0 + 1
 
-        for labeled_fraction in [0.01, 0.05, 0.1, 0.2, 0.5]:
-            for (barcode, correct_donors), p_label in zip(barcode2correct_donor.items(), labelling_p):
-                if len(correct_donors) == 1 and p_label < labeled_fraction:
-                    [correct_donor] = correct_donors
+        labeled_fraction2loss = {}
+        for labeled_fraction in labeled_fractions:
+            for (barcode, correct_donor_names), p_label in zip(barcode2correct_donor.items(), labelling_p):
+                if len(correct_donor_names) == 1 and p_label < labeled_fraction:
+                    [correct_donor] = correct_donor_names
                     barcode2donor_logits.loc[barcode, str(correct_donor)] += 100.
 
             _learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
@@ -224,4 +229,10 @@ class MyTest(unittest.TestCase):
                 barcode_prior_logits=barcode2donor_logits.values)
 
             loss = compute_loss(barcode2correct_donor, barcode2donor_probs)
-            print('labeled fraction of barcodes', labeled_fraction, loss)
+            print(f'labeled fraction of barcodes: {labeled_fraction:<5}  loss={loss:8.4f}')
+            labeled_fraction2loss[labeled_fraction] = loss
+
+        for labeled_fraction, loss in labeled_fraction2loss.items():
+            if labeled_fraction > 0.15 and loss > 0.1:
+                raise RuntimeError(f'Error is too high {labeled_fraction} {loss}')
+
