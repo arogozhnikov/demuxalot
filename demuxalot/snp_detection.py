@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import cellranger_specific
 from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
-from .snp_counter import count_call_variants_for_chromosome, count_snps, CompressedSNPCalls
+from .snp_counter import count_snps, CompressedSNPCalls
 from .utils import as_str
 
 
@@ -64,6 +64,7 @@ def detect_snps_for_chromosome(
         compute_p_misaligned=lambda read: 1e-4,
         discard_read=discard_read,
         joblib_n_jobs=None, # we are already inside joblib job
+        joblib_verbosity=0,
     )
     if len(compressed_snp_calls) == 0:
         return []
@@ -232,10 +233,9 @@ def _export_snps_to_beta(selected_snps, prior_filename):
             df['CHROM'].append(chromosome)
             df['POS'].append(position)
             df['BASE'].append(base)
-            df['DEFAULT_PRIOR'].append(base_count)
 
     # normalize counts at each position so priors sum up to unity
     df = pd.DataFrame(df)
-    df['DEFAULT_PRIOR'] = df.groupby(['CHROM', 'POS'])['DEFAULT_PRIOR'].transform(
-        lambda x: x.clip(1e-5) / x.clip(1e-5).sum())
-    df.to_csv(prior_filename, sep='\t', index=False)
+    # this is an empty dataframe
+    df = df.set_index(['CHROM', 'POS', 'BASE'])
+    df.to_parquet(prior_filename)
