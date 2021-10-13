@@ -1,3 +1,4 @@
+from __future__ import annotations
 from collections import defaultdict
 from typing import Tuple, Dict, List
 
@@ -116,7 +117,7 @@ class CompressedSNPCalls:
         assert np.all(self.snp_calls['p_base_wrong'] != -1)
 
     @staticmethod
-    def concatenate(snp_calls_list: List['CompressedSNPCalls']) -> 'CompressedSNPCalls':
+    def concatenate(snp_calls_list: List[CompressedSNPCalls]) -> CompressedSNPCalls:
         """ concatenates snp calls from the same chromosome """
         n_molecules = 0
         collected_calls = []
@@ -241,6 +242,9 @@ def count_call_variants_for_chromosome(
         bamfile_or_filename = pysam.AlignmentFile(as_str(bamfile_or_filename))
 
     for read in bamfile_or_filename.fetch(chromosome, start=start, stop=stop):
+        if discard_read(read):
+            continue
+
         curr_segment = read.pos // 1000
         if curr_segment != prev_segment:
             compress_old_cbub_groups(
@@ -249,8 +253,6 @@ def count_call_variants_for_chromosome(
             )
             prev_segment = curr_segment
 
-        if discard_read(read):
-            continue
         cb = barcode_handler.get_barcode_index(read)
         if cb is None:
             continue
@@ -263,6 +265,7 @@ def count_call_variants_for_chromosome(
         else:
             cbub2position_and_reads[cbub][0] = max(read.reference_end, cbub2position_and_reads[cbub][0])
             cbub2position_and_reads[cbub][1].append(read)
+    # compress everything that wasn't compressed along the way
     compress_old_cbub_groups(
         np.inf, cbub2position_and_reads, compressed_snp_calls, snp_lookup, compute_p_read_misaligned,
     )
