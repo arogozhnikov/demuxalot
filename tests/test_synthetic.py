@@ -116,21 +116,26 @@ def generate_bam_file(
 
     genotypes = [reference.generate_modification(mutation_prob) for _ in range(n_genotypes)]
     prob_genotypes = generate_genotypes(genotypes)
-    spoiled_genotypes = deepcopy(prob_genotypes)
-    l = spoiled_genotypes.variant_betas.shape[0]
-    spoiled_genotypes.variant_betas[np.arange(l) % 5 != 0] = 1
+    # spoiled_genotypes = deepcopy(prob_genotypes)
+    # # dropping some of variants
+    # l = spoiled_genotypes.variant_betas.shape[0]
+    # spoiled_genotypes.variant_betas[np.arange(l) % 5 != 0] = 1
 
-    barcode2correct_donors = {}
+    barcode2donor_ids = {}
+    barcode2donor_names = {}
     for _ in range(n_barcodes):
         doublet = np.random.uniform() < doublets_fraction
-        barcode2correct_donors[random_str(10) + '-1'] = \
-            tuple(np.random.randint(0, n_genotypes, size=1 + doublet))
+        donor_ids = np.random.randint(0, n_genotypes, size=1 + doublet)
+        donor_names = [f'Donor{donor_id + 1:02}' for donor_id in donor_ids]
+        barcode = random_str(10) + '-1'
+        barcode2donor_ids[barcode] = donor_ids
+        barcode2donor_names[barcode] = donor_names
 
     with pysam.AlignmentFile(filename, "wb", header=reference.generate_header_for_bamfile()) as f:
-        for barcode, donors in barcode2correct_donors.items():
+        for barcode, donor_ids in barcode2donor_ids.items():
             for _ in range(n_reads_per_barcode):
-                donor = np.random.choice(donors)
-                read = genotypes[donor].generate_read(
+                donor_id = np.random.choice(donor_ids)
+                read = genotypes[donor_id].generate_read(
                     read_length=read_length,
                     query_name=random_str(20),
                     cb=barcode,
@@ -141,14 +146,13 @@ def generate_bam_file(
 
     pysam.sort("-o", filename, filename)
     pysam.index(filename)
-    return filename, prob_genotypes, barcode2correct_donors
+    return filename, prob_genotypes, barcode2donor_ids, barcode2donor_names
 
 
-def compute_loss(barcode2correct_donor, barcode2probs):
+def compute_loss(barcode2donor_names, barcode2probs):
     probs = barcode2probs * 0
-    for barcode, correct_donors in barcode2correct_donor.items():
+    for barcode, correct_donors in barcode2donor_names.items():
         for donor in correct_donors:
-            donor = f'Donor{donor + 1:02}'
             probs.loc[barcode, donor] = barcode2probs.loc[barcode, donor]
     p = probs.sum(axis=1)
     return - np.log(p.clip(1e-4)).mean()
@@ -157,13 +161,13 @@ def compute_loss(barcode2correct_donor, barcode2probs):
 class MyTest(unittest.TestCase):
     @classmethod
     def setup_class(cls):
-        cls.filename, cls.prob_genotypes, cls.barcode2correct_donor = generate_bam_file()
+        cls.filename, cls.prob_genotypes, cls.barcode2donor_ids, cls.barcode2donor_names = generate_bam_file()
 
     def test_demultiplex_start_from_genotypes(self):
         """
         Testing quality against different amount of prior informatin about genotypes
         """
-        bam_filename, genotypes, barcode2correct_donor = self.filename, self.prob_genotypes, self.barcode2correct_donor
+        bam_filename, genotypes, barcode2correct_donor = self.filename, self.prob_genotypes, self.barcode2donor_names
         barcode_handler = BarcodeHandler(list(barcode2correct_donor))
 
         calls = count_snps(
@@ -173,23 +177,23 @@ class MyTest(unittest.TestCase):
         )
 
         noise_percent2loss = {}
-        for noise_percent in [0.0, 0.7, 0.9, 0.98, 1.0]:
+        for noise_percent in [0.0, 0.7, 0.9, 0.95, 0.98, 1.0]:
             ng = deepcopy(genotypes)
             ng.variant_betas[np.random.random(ng.n_variants) < noise_percent, :] = 1
             noised_genotypes = ng
             _logits, barcode2donor_probs = Demultiplexer.predict_posteriors(
                 calls, noised_genotypes, barcode_handler=barcode_handler, only_singlets=True)
             loss_no_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
-            result = [loss_no_learning]
+            result = {'no learning': loss_no_learning}
             for Demultiplexer.use_call_counts in [False, True]:
                 learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
                     calls, noised_genotypes, barcode_handler=barcode_handler)
                 loss_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
-                result.append(loss_learning)
+                result[f'call_counts={Demultiplexer.use_call_counts}'] = loss_learning
 
             noise_percent2loss[noise_percent] = result
-        print(noise_percent2loss)
-        assert noise_percent2loss[1.0][1] > noise_percent2loss[0.0][1]
+        print(pd.DataFrame(noise_percent2loss))
+        assert noise_percent2loss[1.0]['call_counts=False'] > noise_percent2loss[0.0]['call_counts=False']
 
     def demultiplex_start_from_assignment(self):
         bam_filename, genotypes, barcode2correct_donor = self.filename, self.prob_genotypes, self.barcode2correct_donor
