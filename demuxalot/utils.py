@@ -1,7 +1,7 @@
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, List
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,7 @@ class BarcodeHandler:
     def n_barcodes(self):
         return len(self.barcode2index)
 
-    def get_barcode_index(self, read: pysam.AlignedRead):
+    def get_barcode_index(self, read: pysam.AlignedRead) -> Optional[int]:
         """ Returns None if barcode is not in the whitelist, otherwise a small integer """
         if not read.has_tag(self.tag):
             return None
@@ -143,7 +143,7 @@ class Timer:
         print("Timer {} completed in  {:.3f} seconds".format(self.name, self.time_taken))
 
 
-def as_str(filename):
+def as_str(filename) -> str:
     assert isinstance(filename, (str, Path))
     return str(filename)
 
@@ -201,3 +201,95 @@ def summarize_counted_SNPs(snp_counts: Dict[str, 'CompressedSNPCalls']):
     fig.show()
 
     return pd.DataFrame(records).sort_values('chromosome').set_index('chromosome')
+
+
+class FeatureLookup:
+    """
+    Allows efficiently represent a number of integer features as a single dense integer.
+    Instance of this class learns a mapping and then allows compressing/uncompressing
+    """
+    def __init__(self, *features):
+        self.n_categories = [np.max(f) + 1 for f in features]
+        total_categories = np.prod(self.n_categories)
+        if total_categories < 2 ** 8:
+            self.dtype = 'uint8'
+        elif total_categories < 2 ** 16:
+            self.dtype = 'uint16'
+        elif total_categories < 2 ** 32:
+            self.dtype = 'uint32'
+        elif total_categories < 2 ** 64:
+            self.dtype = 'uint64'
+        else:
+            raise RuntimeError('too many combinations')
+
+        self._lookup = np.unique(self._to_internal_compressed(*features))
+
+    @property
+    def nvalues(self):
+        return len(self._lookup)
+
+    def _to_internal_compressed(self, *features):
+        result = np.zeros(len(features[0]), dtype=self.dtype)
+        assert len(features) == len(self.n_categories)
+        for f, n_cats in zip(features, self.n_categories):
+            assert f.max() < n_cats
+            result *= n_cats
+            result += f.astype(self.dtype)
+        return result
+
+    def _from_internal_compressed(self, indices):
+        result = []
+        for n_cats in self.n_categories[::-1]:
+            result.append(indices % n_cats)
+            indices //= n_cats
+
+        assert np.all(indices == 0)
+        return result[::-1]
+
+    def lookup_for_individual_features(self):
+        return self._from_internal_compressed(self._lookup)
+
+    def compress(self, *features):
+        compressed_index = np.searchsorted(self._lookup, self._to_internal_compressed(*features))
+        for reconstructed, original in zip(self.uncompress(compressed_index), features):
+            # redundant, checking just in case
+            np.testing.assert_equal(original, reconstructed)
+        counts_of_compressed = np.bincount(compressed_index, minlength=len(self._lookup))
+        return compressed_index, counts_of_compressed
+
+    def uncompress(self, compressed_index):
+        return self._from_internal_compressed(self._lookup[compressed_index])
+
+
+def _compute_qualities(probs: pd.DataFrame, barcode2possible_donors: dict):
+    """
+    Computes metrics to detect. Input is pd.DataFrame with cols=samples, index=barcode.
+    We a priori know that some samples are possible and others are not (possible are passed as true+sample_names).
+    Logloss also checks that probabilities are well-calibrated (because typically those are not).
+    In the context of this function, doublet G1 + G2 is yet-another-genotype and function makes no difference.
+    You need to provide all possible singlet and doublet genotypes
+    """
+    assert probs.index.isin(barcode2possible_donors).all(), " probs index barcodes should be in the dict "
+    assert np.allclose(probs.sum(axis=1), 1, atol=1e-2), "probabilities should sum to one for each barcode"
+
+    donors_in_columns = set(probs.columns)
+    # check that all donors are in the list
+    for _, donors in barcode2possible_donors.items():
+        assert all(d in donors_in_columns for d in donors), f'some of donors not found in probabilities: {donors}'
+
+    loglosses = []
+    is_correct = []
+
+    for barcode, sample_probs in probs.iterrows():
+        sample_probs: pd.Series = sample_probs
+        possible_donors: List[str] = barcode2possible_donors[barcode]
+        prob = sample_probs[possible_donors].sum()
+        loglosses.append(-np.log(prob.clip(1e-4)))
+        # process draws here
+        is_correct.append(sample_probs.idxmax() in possible_donors)
+
+    return {
+        "logloss": np.mean(loglosses),
+        "accuracy": np.mean(is_correct),
+        "error rate": 1 - np.mean(is_correct),
+    }
