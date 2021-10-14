@@ -153,9 +153,9 @@ likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
    
 ```python
 # You can always export learnt genotypes to be used later
-refined_genotypes.save_betas('learnt_genotypes.csv')
+refined_genotypes.save_betas('learnt_genotypes.pqt')
 refined_genotypes = ProbabilisticGenotypes(genotype_names= <list which genotypes to load>)
-refined_genotypes.add_prior_betas('learnt_genotypes.csv')
+refined_genotypes.add_prior_betas('learnt_genotypes.pqt')
 ```
 
 ## Re-saving VCF genotypes with betas
@@ -166,5 +166,5 @@ Loading of internal format is much faster
 ```python
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
 genotypes.add_vcf('path/to/genotypes.vcf')
-genotypes.save_betas('learnt_genotypes.csv')
+genotypes.save_betas('learnt_genotypes.pqt')
 ```
