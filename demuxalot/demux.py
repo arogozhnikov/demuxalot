@@ -37,14 +37,26 @@ class ProbabilisticGenotypes:
         return len(self.genotype_names)
 
     @property
-    def n_variants(self):
+    def n_variants(self) -> int:
         return len(self.snp2snpid)
 
-    def get_betas(self):
+    def get_betas(self) -> np.ndarray:
         # return readonly view
         variants_view: np.ndarray = self.variant_betas[: self.n_variants]
         variants_view.flags.writeable = False
         return variants_view
+
+    def get_snp_ids_for_variants(self) -> np.ndarray:
+        snp2id = {}
+        result = np.zeros(self.n_variants, dtype='int32') - 1
+        for (chrom, pos, _base), variant_id in self.snp2snpid.items():
+            snp = chrom, pos
+            if snp not in snp2id:
+                snp2id[snp] = len(snp2id)
+            result[variant_id] = snp2id[snp]
+        assert np.all(result >= 0)
+        assert np.all(result < self.n_variants)
+        return result
 
     def extend_variants(self, n_samples=1):
         # pre-allocation of space for new variants
@@ -91,11 +103,13 @@ class ProbabilisticGenotypes:
                         contribution[call, donor_id] += prior_strength / len(called_values)
             not_provided = contribution.sum(axis=0) == 0
             if np.sum(~not_provided) < 2:
+                # at least two genotypes should have SNP
                 n_skipped_snps += 1
                 continue
-            # TODO test if this is still needed with new regularization schema
-            for row in range(len(contribution)):
-                contribution[row, not_provided] = contribution[row, ~not_provided].mean() * (1. / prior_strength)
+
+            confidence_for_skipped = 0.1
+            contribution[:, not_provided] = contribution[:, ~not_provided].mean(axis=1, keepdims=True) \
+                                            * confidence_for_skipped
             self.variant_betas[snp_ids] += contribution
         if n_skipped_snps > 0:
             print('skipped', n_skipped_snps, 'SNVs')
