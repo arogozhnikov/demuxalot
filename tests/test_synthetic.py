@@ -177,9 +177,12 @@ class MyTest(unittest.TestCase):
         )
 
         noise_percent2loss = {}
-        for noise_percent in [0.0, 0.7, 0.9, 0.95, 0.98, 1.0]:
+        for noise_percent in [0.0, 0.5, 0.7, 0.9, 0.95, 1.0]:
             ng = deepcopy(genotypes)
-            ng.variant_betas[np.random.random(ng.n_variants) < noise_percent, :] = 0
+            # remove part of SNPs
+            snp_ids = ng.get_snp_ids_for_variants()
+            snp_mask = np.random.random(snp_ids.max() + 1) < noise_percent
+            ng.variant_betas[snp_mask[snp_ids], :] = 0
             noised_genotypes = ng
             _logits, barcode2donor_probs = Demultiplexer.predict_posteriors(
                 calls, noised_genotypes, barcode_handler=barcode_handler, only_singlets=True)
@@ -212,12 +215,12 @@ class MyTest(unittest.TestCase):
         empty_genotypes = genotypes.clone()
         empty_genotypes.variant_betas[:] = 0
 
-        # dry tun to generate pd.DataFrame with correct assignments
+        # dry run to generate pd.DataFrame with correct assignments
         _learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
             calls, empty_genotypes, barcode_handler=barcode_handler)
 
         labelling_p = np.random.random(size=len(barcode2correct_donor))
-        barcode2donor_logits: pd.DataFrame = barcode2donor_probs * 0 + 1
+        barcode2donor_logits: pd.DataFrame = barcode2donor_probs * 0
 
         labeled_fraction2loss = {}
         for labeled_fraction in labeled_fractions:
@@ -252,6 +255,7 @@ class MyTest(unittest.TestCase):
             assert genotypes.genotype_names == genotypes2.genotype_names
             assert genotypes.default_prior == genotypes2.default_prior
             assert set(genotypes.snp2snpid) == set(genotypes2.snp2snpid)
+            # check every individual variant. Ordering of variants can be different (and, likely to be different)
             for snp in genotypes.snp2snpid:
                 assert np.allclose(
                     genotypes.variant_betas[genotypes.snp2snpid[snp]],
