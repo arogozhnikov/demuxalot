@@ -2,7 +2,7 @@
 These are simple end-to-end tests starting from "BAM" and VCF or assignments.
 (all data is synthetic)
 """
-
+import tempfile
 from collections import defaultdict
 
 import pysam
@@ -237,4 +237,25 @@ class MyTest(unittest.TestCase):
         for labeled_fraction, loss in labeled_fraction2loss.items():
             if labeled_fraction > 0.15 and loss > 0.1:
                 raise RuntimeError(f'Error is too high {labeled_fraction} {loss}')
+
+    def test_genotypes_export_and_loading(self):
+        genotypes: ProbabilisticGenotypes = self.prob_genotypes
+        with tempfile.TemporaryDirectory() as dir:
+            filename = f'{dir}/genotypes.parquet'
+            genotypes.save_betas(filename)
+            genotypes2 = ProbabilisticGenotypes(
+                genotype_names=genotypes.genotype_names,
+                default_prior=genotypes.default_prior,
+            )
+            genotypes2.add_prior_betas(filename)
+
+            assert genotypes.genotype_names == genotypes2.genotype_names
+            assert genotypes.default_prior == genotypes2.default_prior
+            assert set(genotypes.snp2snpid) == set(genotypes2.snp2snpid)
+            for snp in genotypes.snp2snpid:
+                assert np.allclose(
+                    genotypes.variant_betas[genotypes.snp2snpid[snp]],
+                    genotypes2.variant_betas[genotypes2.snp2snpid[snp]],
+                )
+
 
