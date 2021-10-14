@@ -179,13 +179,13 @@ class MyTest(unittest.TestCase):
         noise_percent2loss = {}
         for noise_percent in [0.0, 0.7, 0.9, 0.95, 0.98, 1.0]:
             ng = deepcopy(genotypes)
-            ng.variant_betas[np.random.random(ng.n_variants) < noise_percent, :] = 1
+            ng.variant_betas[np.random.random(ng.n_variants) < noise_percent, :] = 0
             noised_genotypes = ng
             _logits, barcode2donor_probs = Demultiplexer.predict_posteriors(
                 calls, noised_genotypes, barcode_handler=barcode_handler, only_singlets=True)
             loss_no_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
             result = {'no learning': loss_no_learning}
-            for Demultiplexer.use_call_counts in [False, True]:
+            for Demultiplexer.use_call_counts in [True]:
                 learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
                     calls, noised_genotypes, barcode_handler=barcode_handler)
                 loss_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
@@ -193,7 +193,9 @@ class MyTest(unittest.TestCase):
 
             noise_percent2loss[noise_percent] = result
         print(pd.DataFrame(noise_percent2loss))
-        assert noise_percent2loss[1.0]['call_counts=False'] > noise_percent2loss[0.0]['call_counts=False']
+        # very rough check
+        for label in noise_percent2loss[1.0]:
+            assert noise_percent2loss[1.0][label] > noise_percent2loss[0.0][label]
 
     def test_demultiplex_start_from_assignment(self, labeled_fractions=(0.01, 0.05, 0.1, 0.2, 0.5)):
         """
@@ -207,12 +209,12 @@ class MyTest(unittest.TestCase):
             chromosome2positions=genotypes.get_chromosome2positions(),
             barcode_handler=barcode_handler,
         )
-        noised_genotypes = deepcopy(genotypes)
-        noised_genotypes.variant_betas[:] = 1
+        empty_genotypes = genotypes.clone()
+        empty_genotypes.variant_betas[:] = 0
 
         # dry tun to generate pd.DataFrame with correct assignments
         _learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
-            calls, noised_genotypes, barcode_handler=barcode_handler)
+            calls, empty_genotypes, barcode_handler=barcode_handler)
 
         labelling_p = np.random.random(size=len(barcode2correct_donor))
         barcode2donor_logits: pd.DataFrame = barcode2donor_probs * 0 + 1
@@ -225,7 +227,7 @@ class MyTest(unittest.TestCase):
                     barcode2donor_logits.loc[barcode, str(correct_donor)] += 100.
 
             _learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
-                calls, noised_genotypes, barcode_handler=barcode_handler,
+                calls, empty_genotypes, barcode_handler=barcode_handler,
                 barcode_prior_logits=barcode2donor_logits.values)
 
             loss = compute_loss(barcode2correct_donor, barcode2donor_probs)
