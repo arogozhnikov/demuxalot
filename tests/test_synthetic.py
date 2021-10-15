@@ -98,8 +98,8 @@ def generate_genotypes(genotypes: List[Reference]) -> ProbabilisticGenotypes:
             donor_id = result.genotype_names.index(donor)
             counts[chrom_pos_base2snp_id[chrom_pos_base], donor_id] = 100
 
-    result.snp2snpid = chrom_pos_base2snp_id
-    result.variant_betas = counts[:len(result.snp2snpid)]
+    result.var2varid = chrom_pos_base2snp_id
+    result.variant_betas = counts[:len(result.var2varid)]
     return result
 
 
@@ -116,10 +116,6 @@ def generate_bam_file(
 
     genotypes = [reference.generate_modification(mutation_prob) for _ in range(n_genotypes)]
     prob_genotypes = generate_genotypes(genotypes)
-    # spoiled_genotypes = deepcopy(prob_genotypes)
-    # # dropping some of variants
-    # l = spoiled_genotypes.variant_betas.shape[0]
-    # spoiled_genotypes.variant_betas[np.arange(l) % 5 != 0] = 1
 
     barcode2donor_ids = {}
     barcode2donor_names = {}
@@ -139,7 +135,7 @@ def generate_bam_file(
                     read_length=read_length,
                     query_name=random_str(20),
                     cb=barcode,
-                    # TODO some overlapping in ub + add mistakes
+                    # TODO some overlapping in ub + add "sequencing mistakes"
                     ub=random_str(10),
                 )
                 f.write(read)
@@ -254,12 +250,12 @@ class MyTest(unittest.TestCase):
 
             assert genotypes.genotype_names == genotypes2.genotype_names
             assert genotypes.default_prior == genotypes2.default_prior
-            assert set(genotypes.snp2snpid) == set(genotypes2.snp2snpid)
+            assert set(genotypes.var2varid) == set(genotypes2.var2varid)
             # check every individual variant. Ordering of variants can be different (and, likely to be different)
-            for snp in genotypes.snp2snpid:
+            for variant in genotypes.var2varid:
                 assert np.allclose(
-                    genotypes.variant_betas[genotypes.snp2snpid[snp]],
-                    genotypes2.variant_betas[genotypes2.snp2snpid[snp]],
+                    genotypes.variant_betas[genotypes.var2varid[variant]],
+                    genotypes2.variant_betas[genotypes2.var2varid[variant]],
                 )
 
 
