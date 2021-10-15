@@ -210,19 +210,22 @@ class ProbabilisticGenotypes:
         return deepcopy(self)
 
 
+"""
+There are two ways of regularizing EM algorithm.
+- Option 1. compute probability for each molecule, but then
+  - easier to compute posterior for different mixtures
+  - hard to limit contribution of a single SNP (this was deciding after all)
+- Option 2. compute contributions of SNPs aggregated over all reads
+  - in this case limiting contribution from a single molecule is hard, but it is limited by group size and
+    number of possible modifications (AS limit in terms of cellranger/STAR alignment)
+
+Second one is used in this implementation.
+"""
+
+
 class Demultiplexer:
     """
     Demultiplexer that can infer (learn) additional information about genotypes to achieve better quality.
-
-    There are two ways of regularizing EM algorithm.
-    - one is to compute probability for each molecule, but then
-      - easier to compute posterior for different mixtures
-      - hard to limit contribution of a single SNP (this was deciding after all)
-    - second is to compute contributions of SNPs aggregated over all reads
-      - in this case limiting contribution from a single molecule is hard, but it is limited by group size and
-        number of possible modifications (AS limit in terms of cellranger/STAR alignment)
-
-    Second one is used in this implementation.
     """
     # contribution_power minimizes contribution
     # from barcodes that don't have any good candidate donor
