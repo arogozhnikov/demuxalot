@@ -129,6 +129,7 @@ def detect_snps_positions(
         bamfile_location: str,
         genotypes: ProbabilisticGenotypes,
         barcode_handler: BarcodeHandler,
+        *,
         minimum_coverage: int,
         minimum_alternative_fraction: float = 0.01,
         minimum_alternative_coverage: int = 100,
@@ -141,6 +142,7 @@ def detect_snps_positions(
         result_beta_prior_filename=None,
         ignore_known_snps=True,
         max_fragment_step=10_000_000,
+        joblib_verbosity=11,
 ):
     """
     Detects SNPs based on data.
@@ -154,6 +156,7 @@ def detect_snps_positions(
         joblib_n_jobs=joblib_n_jobs,
         discard_read=discard_read,
         compute_p_misaligned=compute_p_read_misaligned,
+        joblib_verbosity=joblib_verbosity,
     )
 
     _likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
@@ -164,8 +167,8 @@ def detect_snps_positions(
     )
     barcode2donor = posterior_probabilities[posterior_probabilities.max(axis=1).gt(0.8)].idxmax(axis=1).to_dict()
     donor_counts = Counter(barcode2donor.values())
-    for donor in genotypes.genotype_names:
-        print('During inference of SNPs for', donor, 'will use', donor_counts[donor], 'barcodes')
+    print('Number of SNPs used for each donor during inference')
+    print(pd.Series(donor_counts).sort_index())
 
     # step2. collect SNPs using predictions from rough demultiplexing
     filename = bamfile_location if isinstance(bamfile_location, (str, Path)) else list(bamfile_location.values())[0]
@@ -194,7 +197,7 @@ def detect_snps_positions(
             for start in range(0, length, max_fragment_step)
         ]
 
-    with Parallel(n_jobs=joblib_n_jobs, verbose=11, pre_dispatch='all') as parallel:
+    with Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity, pre_dispatch='all') as parallel:
         chrom_pos_importances_collection = parallel(create_tasks())
 
     chrom_pos_importances = sum(chrom_pos_importances_collection, [])
