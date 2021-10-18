@@ -128,7 +128,6 @@ class CompressedSNPCalls:
 
             collected_calls.append(variant_calls)
             collected_molecules.append(calls.molecules[:calls.n_molecules])
-            # return none
             n_molecules += calls.n_molecules
 
         result = CompressedSNPCalls()
@@ -226,8 +225,8 @@ def compress_old_cbub_groups(
 
 def count_call_variants_for_chromosome(
         bamfile_or_filename,
-        chromosome,
-        chromosome_snps_zero_based,
+        chromosome: str,
+        chromosome_snps_zero_based: np.ndarray,
         barcode_handler: BarcodeHandler,
         compute_p_read_misaligned,
         discard_read,
