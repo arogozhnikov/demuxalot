@@ -157,6 +157,7 @@ def compute_loss(barcode2donor_names, barcode2probs):
 class MyTest(unittest.TestCase):
     @classmethod
     def setup_class(cls):
+        np.random.seed(42)
         cls.filename, cls.prob_genotypes, cls.barcode2donor_ids, cls.barcode2donor_names = generate_bam_file()
 
     def test_demultiplex_start_from_genotypes(self):
@@ -174,19 +175,19 @@ class MyTest(unittest.TestCase):
 
         noise_percent2loss = {}
         for noise_percent in [0.0, 0.5, 0.7, 0.9, 0.95, 1.0]:
-            ng = deepcopy(genotypes)
+            ng = genotypes.clone()
             # remove part of SNPs
             snp_ids = ng.get_snp_ids_for_variants()
             snp_mask = np.random.random(snp_ids.max() + 1) < noise_percent
             ng.variant_betas[snp_mask[snp_ids], :] = 0
             noised_genotypes = ng
             _logits, barcode2donor_probs = Demultiplexer.predict_posteriors(
-                calls, noised_genotypes, barcode_handler=barcode_handler, only_singlets=True)
+                calls, noised_genotypes, barcode_handler=barcode_handler, doublet_prior=0.)
             loss_no_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
             result = {'no learning': loss_no_learning}
             for Demultiplexer.use_call_counts in [True]:
                 learnt_genotypes, barcode2donor_probs = Demultiplexer.learn_genotypes(
-                    calls, noised_genotypes, barcode_handler=barcode_handler)
+                    calls, noised_genotypes, barcode_handler=barcode_handler, doublet_prior=0.)
                 loss_learning = compute_loss(barcode2correct_donor, barcode2donor_probs)
                 result[f'call_counts={Demultiplexer.use_call_counts}'] = loss_learning
 
