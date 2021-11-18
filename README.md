@@ -128,13 +128,13 @@ refined_genotypes = ProbabilisticGenotypes(genotype_names= <list which genotypes
 refined_genotypes.add_prior_betas('learnt_genotypes.parquet')
 ```
 
-## Re-saving VCF genotypes with betas
+## Re-saving VCF genotypes with betas (optional, recommended)
 
 Generally makes sense to export VCF to internal format only when you plan to load it many times.
-Loading of internal format is much faster 
+Loading of internal format is *much* faster than parsing/validating VCF. 
 
 ```python
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
 genotypes.add_vcf('path/to/genotypes.vcf')
-genotypes.save_betas('learnt_genotypes.csv')
+genotypes.save_betas('learnt_genotypes.parquet')
 ```
