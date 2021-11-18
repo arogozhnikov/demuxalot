@@ -115,47 +115,17 @@ likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
 
 
 ## Running (complex scenario)
-Refinement of known genotypes
 
-```python
-from demuxalot import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
+Refinement of known genotypes is shown in a notebook, see `examples/`
 
-# Loading genotypes
-genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
-genotypes.add_vcf('path/to/genotypes.vcf')
-
-# TODO add SNPs detection
-
-
-# Load barcodes
-barcode_handler = BarcodeHandler.from_file('path/to/barcodes.csv')
-
-snps = count_snps(
-    bamfile_location='path/to/sorted_alignments.bam',
-    chromosome2positions=genotypes.get_chromosome2positions(),
-    barcode_handler=barcode_handler, 
-)
-
-# Infer refined genotypes 
-refined_genotypes, _posterior_probabilities = \
-    Demultiplexer.learn_genotypes(snps, genotypes=genotypes, n_iterations=5)
-
-# Use learnt genotypes for demultiplexing
-likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
-    snps,
-    genotypes=refined_genotypes,
-    barcode_handler=barcode_handler,
-    only_singlets=False,
-)
-```
 
 ## Saving/loading genotypes
    
 ```python
 # You can always export learnt genotypes to be used later
-refined_genotypes.save_betas('learnt_genotypes.csv')
-refined_genotypes = ProbabilisticGenotypes(genotype_names= <list which genotypes to load>)
-refined_genotypes.add_prior_betas('learnt_genotypes.csv')
+refined_genotypes.save_betas('learnt_genotypes.parquet')
+refined_genotypes = ProbabilisticGenotypes(genotype_names= <list which genotypes to load here>)
+refined_genotypes.add_prior_betas('learnt_genotypes.parquet')
 ```
 
 ## Re-saving VCF genotypes with betas
