@@ -109,7 +109,6 @@ likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
     snps,
     genotypes=genotypes,
     barcode_handler=barcode_handler,
-    only_singlets=False
 )
 ```
 
@@ -145,7 +144,7 @@ likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
     snps,
     genotypes=refined_genotypes,
     barcode_handler=barcode_handler,
-    only_singlets=False,
+    doublet_prior=0.35
 )
 ```
 
