@@ -163,7 +163,7 @@ def detect_snps_positions(
         snps,
         genotypes=genotypes,
         barcode_handler=barcode_handler,
-        only_singlets=True,
+        doublet_prior=0.0,
     )
     barcode2donor = posterior_probabilities[posterior_probabilities.max(axis=1).gt(0.8)].idxmax(axis=1).to_dict()
     donor_counts = Counter(barcode2donor.values())

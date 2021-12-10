@@ -232,7 +232,7 @@ class Demultiplexer:
     # contribution_power minimizes contribution
     # from barcodes that don't have any good candidate donor
     contribution_power = 2.
-    aggregate_on_snps = True
+    aggregate_on_snps = False
     compensation_during_computing_barcode_logits = 0.5
 
     @staticmethod
@@ -444,7 +444,7 @@ class Demultiplexer:
             n_barcodes: int, n_genotypes: int
     ):
         barcode_posterior_logits = np.zeros([n_barcodes, 1], dtype='float32') \
-            + Demultiplexer._doublet_penalties(genotype_names, doublet_prior=doublet_prior)
+            + Demultiplexer._doublet_penalties(n_genotypes, doublet_prior=doublet_prior)
 
         column_names = []
         for pg_index, genotype_name, variant2prob in Demultiplexer._iterate_genotypes_options(
