@@ -404,6 +404,14 @@ class Demultiplexer:
                 genotype_prob=genotype_prob, n_barcodes=n_barcodes, n_genotypes=n_genotypes,
             )
 
+        """
+        One can also stop aggregating naive information about number of bases and instead try to employ 
+        all probabilities of calls available for each base.
+        This is substantially more expensive, but improvements in quality are minor.
+        
+        Reserved for future experiments, but likely this code will be removed.
+        """
+
         barcode_doublet_penaltites = Demultiplexer._doublet_penalties(n_genotypes, doublet_prior=doublet_prior)
 
         snp_ids = molecule_calls['snp_id']
@@ -523,7 +531,8 @@ class Demultiplexer:
                    ('p_molecule_aligned_wrong', 'float32')]
         ).repeat(n_calls_in_total, axis=0)
 
-        start = 0
+        # merge molecule calls
+        n_molecules = 0
         for chromosome, compressed_snp_calls in chromosome2compressed_snp_calls.items():
             variant_calls = compressed_snp_calls.snp_calls[:compressed_snp_calls.n_snp_calls]
             molecules = compressed_snp_calls.molecules[:compressed_snp_calls.n_molecules]
@@ -539,7 +548,7 @@ class Demultiplexer:
             # mark invalid calls, those will be filter afterwards
             variant_id = np.where(index[variant_id] == searched, lookup['variant_index'][variant_id], -1)
 
-            fragment = molecule_calls[start:start + compressed_snp_calls.n_snp_calls]
+            fragment = molecule_calls[n_molecules:n_molecules + compressed_snp_calls.n_snp_calls]
             fragment['variant_id'] = variant_id
             fragment['snp_id'] = variant_index2snp_index[variant_id]
             fragment['compressed_cb'] = molecules['compressed_cb'][variant_calls['molecule_index']]
@@ -548,8 +557,8 @@ class Demultiplexer:
             fragment['p_base_wrong'] = variant_calls['p_base_wrong']
             fragment['p_molecule_aligned_wrong'] = molecules['p_group_misaligned'][variant_calls['molecule_index']]
 
-            start += compressed_snp_calls.n_snp_calls
-        assert start == len(molecule_calls)
+            n_molecules += compressed_snp_calls.n_snp_calls
+        assert n_molecules == len(molecule_calls)
 
         # filtering out calls that did not match any snp
         did_not_match_snp = molecule_calls['variant_id'] == -1
