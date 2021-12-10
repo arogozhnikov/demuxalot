@@ -20,7 +20,7 @@ def detect_snps_for_chromosome(
         stop,
         sorted_donors,
         barcode2donor: dict,
-        discard_read,
+        parse_read,
         barcode_handler: BarcodeHandler,
         regularization: float,
         minimum_coverage: int,
@@ -36,7 +36,8 @@ def detect_snps_for_chromosome(
         with pysam.AlignmentFile(as_str(filename)) as bamfile:
             # size = 4 x positions (first axis enumerates "ACTG"))
             coverage = coverage + np.asarray(
-                bamfile.count_coverage(chromosome, start=start, stop=stop, read_callback=lambda read: not discard_read(read)),
+                bamfile.count_coverage(chromosome, start=start, stop=stop,
+                                       read_callback=lambda read: parse_read(read) is not None),
                 dtype="int32"
             )
 
@@ -61,9 +62,8 @@ def detect_snps_for_chromosome(
         bamfile_path,
         chromosome2positions={chromosome: candidate_positions},
         barcode_handler=barcode_handler,
-        compute_p_misaligned=lambda read: 1e-4,
-        discard_read=discard_read,
-        joblib_n_jobs=None, # we are already inside joblib job
+        parse_read=parse_read,
+        joblib_n_jobs=None,  # we are already inside joblib job
         joblib_verbosity=0,
     )
     if len(compressed_snp_calls) == 0:
@@ -136,8 +136,7 @@ def detect_snps_positions(
         n_best_snps_per_donor: int = 100,
         n_additional_best_snps: int = 1000,
         regularization: float = 3.,
-        discard_read=cellranger_specific.discard_read,
-        compute_p_read_misaligned=cellranger_specific.compute_p_misaligned,
+        parse_read=cellranger_specific.parse_read,
         joblib_n_jobs=-1,
         result_beta_prior_filename=None,
         ignore_known_snps=True,
@@ -154,8 +153,7 @@ def detect_snps_positions(
         chromosome2positions=genotypes.get_chromosome2positions(),
         barcode_handler=barcode_handler,
         joblib_n_jobs=joblib_n_jobs,
-        discard_read=discard_read,
-        compute_p_misaligned=compute_p_read_misaligned,
+        parse_read=parse_read,
         joblib_verbosity=joblib_verbosity,
     )
 
@@ -185,7 +183,7 @@ def detect_snps_positions(
                 start=start,
                 stop=min(start + max_fragment_step, length),
                 barcode2donor=barcode2donor,
-                discard_read=discard_read,
+                parse_read=parse_read,
                 sorted_donors=sorted_donors,
                 minimum_coverage=minimum_coverage,
                 minimum_alternative_coverage=minimum_alternative_coverage,

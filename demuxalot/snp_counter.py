@@ -1,14 +1,15 @@
 from __future__ import annotations
+
 from collections import defaultdict
+from pathlib import Path
 from typing import Tuple, Dict, List
 
 import joblib
 import numpy as np
 import pysam
-from pathlib import Path
 
-from .cellranger_specific import compute_p_misaligned, discard_read
-from .utils import hash_string, BarcodeHandler, compress_base, as_str
+from .cellranger_specific import parse_read
+from .utils import BarcodeHandler, compress_base, as_str
 
 
 class ChromosomeSNPLookup:
@@ -138,10 +139,9 @@ class CompressedSNPCalls:
         return result
 
 
-def compress_cbub_reads_group_to_snips(
+def compress_molecule_reads_to_snips(
         reads,
         snp_lookup: ChromosomeSNPLookup,
-        compute_p_read_misaligned,
         skip_complete_duplicates=True,
 ) -> Tuple[float, list]:
     """
@@ -151,18 +151,19 @@ def compress_cbub_reads_group_to_snips(
     p_group_misaligned = 1
     processed_positions = set()
     SNPs = {}  # position to list of pairs character, quality
-    for read in reads:
-        p_read_misaligned = compute_p_read_misaligned(read)
-        pos = (read.reference_start, read.reference_end, read.get_tag("AS"))
-        if skip_complete_duplicates and (pos in processed_positions):
-            # ignoring duplicates with same begin/end and number of mismatches
-            # relatively cheap way to exclude complete duplicates, as those do not contribute
-            continue
-        processed_positions.add(pos)
-        p_group_misaligned *= p_read_misaligned
+    for read, p_misaligned_read in reads:
+        if skip_complete_duplicates:
+            # TODO consider case when AS is not available?
+            pos = (read.reference_start, read.reference_end, read.get_tag("AS"))
+            if pos in processed_positions:
+                # ignoring duplicates with same begin/end and number of mismatches
+                # relatively cheap way to exclude complete duplicates, as those do not contribute
+                continue
+            processed_positions.add(pos)
+        p_group_misaligned *= p_misaligned_read
 
         for reference_position, base, base_qual in snp_lookup.get_snps(read):
-            SNPs.setdefault(reference_position, []).append((base, base_qual, p_read_misaligned))
+            SNPs.setdefault(reference_position, []).append((base, base_qual, p_misaligned_read))
 
     compressed_snps = []  # (position, base, p_wrong)
     for snp_position, bases_probs in SNPs.items():
@@ -178,40 +179,43 @@ def compress_cbub_reads_group_to_snips(
             base2p_wrong = {
                 base: p_wrong
                 for base, p_wrong in base2p_wrong.items()
-                if p_wrong * 0.01 <= best_prob or p_wrong < min(0.001, 1e8 * best_prob)
+                # second condition is basically two or more confident calls
+                if p_wrong <= 100 * best_prob or p_wrong < min(0.001, 1e8 * best_prob)
             }
 
-        # if #candidates is still not one, discard this sample
+        # if #candidates is still not one, discard this sample and don't make any call
         if len(base2p_wrong) != 1:
             continue
-        (base, p_wrong), = base2p_wrong.items()
-        compressed_snps.append((snp_position, base, p_wrong))
+        for base, p_wrong in base2p_wrong.items():
+            # this loop can be iterated only once
+            compressed_snps.append((snp_position, base, p_wrong))
 
     return p_group_misaligned, compressed_snps
 
 
-def compress_old_cbub_groups(
+def compress_groups_of_molecule_reads(
         threshold_position: int,
         cbub2position_and_reads,
         compressed_snp_calls,
         snp_lookup: ChromosomeSNPLookup,
-        compute_p_read_misaligned,
 ):
     """
     Compresses groups of reads that already left region of our consideration.
+    There will be no overlap with new reads, so we'll not need to collide/double count SNPs.
     Compressed groups are removed from cbub2position_and_reads and only snps are kept in composed_snp_calls.
+    cbub = CB + UB = barcode + molecule code = UMI
     """
     to_remove = []
     for cbub, (position, reads) in cbub2position_and_reads.items():
         if position < threshold_position:
             to_remove.append(cbub)
             if not snp_lookup.snips_exist(
-                    min(read.reference_start for read in reads), max(read.reference_end for read in reads) + 1,
+                    min(read.reference_start for read, _ in reads), max(read.reference_end for read, _ in reads) + 1,
             ):
                 # no SNPs in this fragment, just skip it
                 continue
-            p_group_misaligned, snips = compress_cbub_reads_group_to_snips(
-                reads, snp_lookup, compute_p_read_misaligned=compute_p_read_misaligned
+            p_group_misaligned, snips = compress_molecule_reads_to_snips(
+                reads, snp_lookup,
             )
             if len(snips) == 0:
                 # there is no reason to care about this group, it provides no genotype information
@@ -223,13 +227,17 @@ def compress_old_cbub_groups(
         cbub2position_and_reads.pop(cbub)
 
 
+# maximal distance between non-overlapping reads
+# from the same molecule to be considered together
+SEGMENT_LENGTH = 1000
+
+
 def count_call_variants_for_chromosome(
         bamfile_or_filename,
         chromosome: str,
         chromosome_snps_zero_based: np.ndarray,
         barcode_handler: BarcodeHandler,
-        compute_p_read_misaligned,
-        discard_read,
+        parse_read,
         start=None,
         stop=None,
 ) -> Tuple[str, CompressedSNPCalls]:
@@ -241,33 +249,30 @@ def count_call_variants_for_chromosome(
         bamfile_or_filename = pysam.AlignmentFile(as_str(bamfile_or_filename))
 
     for read in bamfile_or_filename.fetch(chromosome, start=start, stop=stop):
-        if discard_read(read):
+        parsed = parse_read(read)
+        if parsed is None:
             continue
-
-        curr_segment = read.pos // 1000
-        if curr_segment != prev_segment:
-            compress_old_cbub_groups(
-                read.pos - 1000, cbub2position_and_reads, compressed_snp_calls, snp_lookup,
-                compute_p_read_misaligned,
-            )
-            prev_segment = curr_segment
-
         cb = barcode_handler.get_barcode_index(read)
         if cb is None:
             continue
-        if not read.has_tag("UB"):
-            continue
-        ub = hash_string(read.get_tag("UB"))
+
+        p_misaligned_read, ub = parsed
         cbub = cb, ub
         if cbub not in cbub2position_and_reads:
-            cbub2position_and_reads[cbub] = [read.reference_end, [read]]
+            cbub2position_and_reads[cbub] = [read.reference_end, [(read, p_misaligned_read)]]
         else:
             cbub2position_and_reads[cbub][0] = max(read.reference_end, cbub2position_and_reads[cbub][0])
-            cbub2position_and_reads[cbub][1].append(read)
+            cbub2position_and_reads[cbub][1].append((read, p_misaligned_read))
+
+        curr_segment = read.pos // SEGMENT_LENGTH
+        if curr_segment != prev_segment:
+            compress_groups_of_molecule_reads(
+                read.pos - SEGMENT_LENGTH, cbub2position_and_reads, compressed_snp_calls, snp_lookup,
+            )
+            prev_segment = curr_segment
+
     # compress everything that wasn't compressed along the way
-    compress_old_cbub_groups(
-        np.inf, cbub2position_and_reads, compressed_snp_calls, snp_lookup, compute_p_read_misaligned,
-    )
+    compress_groups_of_molecule_reads(np.inf, cbub2position_and_reads, compressed_snp_calls, snp_lookup)
     compressed_snp_calls.minimize_memory_footprint()
     return chromosome, compressed_snp_calls
 
@@ -278,8 +283,7 @@ def count_snps(
         barcode_handler: BarcodeHandler,
         joblib_n_jobs=-1,
         joblib_verbosity=11,
-        compute_p_misaligned=compute_p_misaligned,
-        discard_read=discard_read,
+        parse_read=parse_read,
 ) -> Dict[str, CompressedSNPCalls]:
     """
     Computes which molecules can provide information about SNPs
@@ -290,12 +294,11 @@ def count_snps(
     :param barcode_handler: handler which picks
     :param joblib_n_jobs: how many threads to run in parallel
     :param joblib_verbosity: verbosity level as interpreted by joblib
-    :param compute_p_misaligned: callback that estimates probability of read being misaligned
-    :param discard_read: callback that decides if aligned read should be discarded from demultiplexing analysis
+    :param parse_read: callback that checks if read should be discarded and parses necessary quantities
 
-    see cellranger_specific.py for examples of callbacks specific for cellranger
+    see cellranger_specific.py for example of callbacks specific for cellranger
 
-    :return: returns an object which stores information about molecules, their SNPs and barcodes,
+    :return: returns for each chromosome an object which stores information about molecules, their SNPs and barcodes,
         that can be used by demultiplexer
     """
     jobs = prepare_counting_tasks(bamfile_location, chromosome2positions, barcode_handler=barcode_handler)
@@ -308,8 +311,7 @@ def count_snps(
                 start=start,
                 stop=stop,
                 barcode_handler=barcode_handler,
-                compute_p_read_misaligned=compute_p_misaligned,
-                discard_read=discard_read,
+                parse_read=parse_read,
             )
             for bamfile, chromosome, start, stop, positions, barcode_handler in jobs
         )
@@ -336,7 +338,7 @@ def prepare_counting_tasks(
 ):
     """
     Split calling of a file into subtasks.
-    Each subtask defined by genomic region and non-empty list of positions
+    Each subtask defined by genomic region and non-empty list of positions within.
     """
     if isinstance(bamfile_location, dict):
         rg2bamfile_location = bamfile_location
@@ -374,11 +376,11 @@ def prepare_counting_tasks(
                 start = max(0, min(positions_subset) - minimum_overlap)
                 stop = min(length, max(positions_subset) + minimum_overlap)
                 task = (bamfile_location, chromosome, start, stop, positions_subset, barcode_handler)
-                # very naive and strange heuristic for how long each task will take
-                # needed to assign more weight to small regions with deep coverage and many SNPs
+                # very naive heuristic for how long each task will take.
+                # generally to small regions with deep coverage and many SNPs are considered more complex
                 complexity = len(positions_subset) * chromosome2n_reads[chromosome] / length ** 0.5
-                tasks.append((-complexity, task))
+                tasks.append((complexity, task))
 
     # complex tasks first
-    tasks = [task for complexity, task in sorted(tasks)]
+    tasks = [task for complexity, task in sorted(tasks, reverse=True)]
     return tasks

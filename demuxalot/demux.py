@@ -443,6 +443,7 @@ class Demultiplexer:
             genotype_names, barcode_calls, doublet_prior, genotype_prob: np.ndarray,
             n_barcodes: int, n_genotypes: int
     ):
+        # n_barcodes x n_genotypes
         barcode_posterior_logits = np.zeros([n_barcodes, 1], dtype='float32') \
             + Demultiplexer._doublet_penalties(n_genotypes, doublet_prior=doublet_prior)
 

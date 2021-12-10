@@ -9,7 +9,7 @@ import pysam
 import urllib.request
 
 
-def hash_string(s):
+def hash_string(s) -> int:
     """
     Used to compress UB (molecule barcodes) to group identical ones.
     Mapping is deterministic, unique and fast for UBs used.
