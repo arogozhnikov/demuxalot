@@ -214,12 +214,12 @@ class ProbabilisticGenotypes:
 
 """
 There are two ways of regularizing EM algorithm.
-- Option 1. compute probability for each molecule, but then
-  - easier to compute posterior for different mixtures
-  - hard to limit contribution of a single SNP (this was deciding after all)
-- Option 2. compute contributions of SNPs aggregated over all reads
-  - in this case limiting contribution from a single molecule is hard, but it is limited by group size and
-    number of possible modifications (AS limit in terms of cellranger/STAR alignment)
+Option 1. compute probability for each molecule, but then
+- easier to compute posterior for different mixtures
+- hard to limit contribution of a single SNP (this was deciding after all)
+Option 2. compute contributions of SNPs aggregated over all reads
+- in this case limiting contribution from a single molecule is hard, but it is limited by group size and
+  number of possible modifications (AS limit in terms of cellranger/STAR alignment)
 
 Second one is used in this implementation.
 """
