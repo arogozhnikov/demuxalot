@@ -294,7 +294,7 @@ class Demultiplexer:
                 variant_index2snp_index, variant_index2betas + genotype_addition, p_genotype_clip=p_genotype_clip)
 
             barcode_posterior_logits, columns_names = Demultiplexer.compute_barcode_logits(
-                genotypes.genotype_names, calls, molecule_calls=_molecule_calls,
+                genotypes.genotype_names, barcode_calls=calls, molecule_calls=_molecule_calls,
                 doublet_prior=doublet_prior, genotype_prob=genotype_prob,
                 n_barcodes=barcode_handler.n_barcodes, n_genotypes=genotypes.n_genotypes,
             )
