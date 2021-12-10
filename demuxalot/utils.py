@@ -211,14 +211,14 @@ class FeatureLookup:
     def __init__(self, *features):
         self.n_categories = [np.max(f) + 1 for f in features]
         total_categories = np.prod(self.n_categories)
-        if total_categories < 2 ** 8:
-            self.dtype = 'uint8'
-        elif total_categories < 2 ** 16:
-            self.dtype = 'uint16'
-        elif total_categories < 2 ** 32:
-            self.dtype = 'uint32'
-        elif total_categories < 2 ** 64:
-            self.dtype = 'uint64'
+        if total_categories < 2 ** 7:
+            self.dtype = 'int8'
+        elif total_categories < 2 ** 15:
+            self.dtype = 'int16'
+        elif total_categories < 2 ** 31:
+            self.dtype = 'int32'
+        elif total_categories < 2 ** 63:
+            self.dtype = 'int64'
         else:
             raise RuntimeError('too many combinations')
 
