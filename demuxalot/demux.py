@@ -400,7 +400,7 @@ class Demultiplexer:
     ):
         if not Demultiplexer.aggregate_on_snps:
             return Demultiplexer.compute_barcode_logits_using_barcode_calls(
-                genotype_names, barcode_calls, molecule_calls=molecule_calls, doublet_prior=doublet_prior,
+                genotype_names, barcode_calls=barcode_calls, doublet_prior=doublet_prior,
                 genotype_prob=genotype_prob, n_barcodes=n_barcodes, n_genotypes=n_genotypes,
             )
 
@@ -440,7 +440,7 @@ class Demultiplexer:
 
     @staticmethod
     def compute_barcode_logits_using_barcode_calls(
-            genotype_names, barcode_calls, molecule_calls, doublet_prior, genotype_prob: np.ndarray,
+            genotype_names, barcode_calls, doublet_prior, genotype_prob: np.ndarray,
             n_barcodes: int, n_genotypes: int
     ):
         barcode_posterior_logits = np.zeros([n_barcodes, 1], dtype='float32') \
