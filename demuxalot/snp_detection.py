@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import cellranger_specific
 from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
-from .snp_counter import count_call_variants_for_chromosome, count_snps, CompressedSNPCalls
+from .snp_counter import count_snps, CompressedSNPCalls
 from .utils import as_str
 
 
@@ -20,7 +20,7 @@ def detect_snps_for_chromosome(
         stop,
         sorted_donors,
         barcode2donor: dict,
-        discard_read,
+        parse_read,
         barcode_handler: BarcodeHandler,
         regularization: float,
         minimum_coverage: int,
@@ -36,7 +36,8 @@ def detect_snps_for_chromosome(
         with pysam.AlignmentFile(as_str(filename)) as bamfile:
             # size = 4 x positions (first axis enumerates "ACTG"))
             coverage = coverage + np.asarray(
-                bamfile.count_coverage(chromosome, start=start, stop=stop, read_callback=lambda read: not discard_read(read)),
+                bamfile.count_coverage(chromosome, start=start, stop=stop,
+                                       read_callback=lambda read: parse_read(read) is not None),
                 dtype="int32"
             )
 
@@ -61,9 +62,9 @@ def detect_snps_for_chromosome(
         bamfile_path,
         chromosome2positions={chromosome: candidate_positions},
         barcode_handler=barcode_handler,
-        compute_p_misaligned=lambda read: 1e-4,
-        discard_read=discard_read,
-        joblib_n_jobs=None, # we are already inside joblib job
+        parse_read=parse_read,
+        joblib_n_jobs=None,  # we are already inside joblib job
+        joblib_verbosity=0,
     )
     if len(compressed_snp_calls) == 0:
         return []
@@ -128,18 +129,19 @@ def detect_snps_positions(
         bamfile_location: str,
         genotypes: ProbabilisticGenotypes,
         barcode_handler: BarcodeHandler,
+        *,
         minimum_coverage: int,
         minimum_alternative_fraction: float = 0.01,
         minimum_alternative_coverage: int = 100,
         n_best_snps_per_donor: int = 100,
         n_additional_best_snps: int = 1000,
         regularization: float = 3.,
-        discard_read=cellranger_specific.discard_read,
-        compute_p_read_misaligned=cellranger_specific.compute_p_misaligned,
+        parse_read=cellranger_specific.parse_read,
         joblib_n_jobs=-1,
         result_beta_prior_filename=None,
         ignore_known_snps=True,
         max_fragment_step=10_000_000,
+        joblib_verbosity=11,
 ):
     """
     Detects SNPs based on data.
@@ -151,20 +153,20 @@ def detect_snps_positions(
         chromosome2positions=genotypes.get_chromosome2positions(),
         barcode_handler=barcode_handler,
         joblib_n_jobs=joblib_n_jobs,
-        discard_read=discard_read,
-        compute_p_misaligned=compute_p_read_misaligned,
+        parse_read=parse_read,
+        joblib_verbosity=joblib_verbosity,
     )
 
     _likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
         snps,
         genotypes=genotypes,
         barcode_handler=barcode_handler,
-        only_singlets=True,
+        doublet_prior=0.0,
     )
     barcode2donor = posterior_probabilities[posterior_probabilities.max(axis=1).gt(0.8)].idxmax(axis=1).to_dict()
     donor_counts = Counter(barcode2donor.values())
-    for donor in genotypes.genotype_names:
-        print('During inference of SNPs for', donor, 'will use', donor_counts[donor], 'barcodes')
+    print('Number of SNPs used for each donor during inference')
+    print(pd.Series(donor_counts).sort_index())
 
     # step2. collect SNPs using predictions from rough demultiplexing
     filename = bamfile_location if isinstance(bamfile_location, (str, Path)) else list(bamfile_location.values())[0]
@@ -181,7 +183,7 @@ def detect_snps_positions(
                 start=start,
                 stop=min(start + max_fragment_step, length),
                 barcode2donor=barcode2donor,
-                discard_read=discard_read,
+                parse_read=parse_read,
                 sorted_donors=sorted_donors,
                 minimum_coverage=minimum_coverage,
                 minimum_alternative_coverage=minimum_alternative_coverage,
@@ -193,7 +195,7 @@ def detect_snps_positions(
             for start in range(0, length, max_fragment_step)
         ]
 
-    with Parallel(n_jobs=joblib_n_jobs, verbose=11, pre_dispatch='all') as parallel:
+    with Parallel(n_jobs=joblib_n_jobs, verbose=joblib_verbosity, pre_dispatch='all') as parallel:
         chrom_pos_importances_collection = parallel(create_tasks())
 
     chrom_pos_importances = sum(chrom_pos_importances_collection, [])
@@ -232,10 +234,9 @@ def _export_snps_to_beta(selected_snps, prior_filename):
             df['CHROM'].append(chromosome)
             df['POS'].append(position)
             df['BASE'].append(base)
-            df['DEFAULT_PRIOR'].append(base_count)
 
     # normalize counts at each position so priors sum up to unity
     df = pd.DataFrame(df)
-    df['DEFAULT_PRIOR'] = df.groupby(['CHROM', 'POS'])['DEFAULT_PRIOR'].transform(
-        lambda x: x.clip(1e-5) / x.clip(1e-5).sum())
-    df.to_csv(prior_filename, sep='\t', index=False)
+    # this is an empty dataframe
+    df = df.set_index(['CHROM', 'POS', 'BASE'])
+    df.to_parquet(prior_filename)
