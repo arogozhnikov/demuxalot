@@ -279,7 +279,7 @@ class Demultiplexer:
             doublet_prior=0.,
             barcode_prior_logits: np.ndarray = None,
     ):
-        assert doublet_prior >= 0
+        assert 0 <= doublet_prior < 1
         if barcode_prior_logits is not None:
             n_options = len(Demultiplexer._doublet_penalties(genotypes.n_genotypes, doublet_prior))
             assert barcode_prior_logits.shape == (barcode_handler.n_barcodes, n_options), 'wrong shape of priors'
@@ -361,6 +361,7 @@ class Demultiplexer:
 
     @staticmethod
     def _doublet_penalties(n_genotypes: int, doublet_prior: float) -> np.ndarray:
+        assert 0 <= doublet_prior < 1
         if doublet_prior == 0:
             return np.zeros(n_genotypes, dtype='float32')
 
