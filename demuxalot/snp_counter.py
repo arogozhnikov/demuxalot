@@ -179,15 +179,14 @@ def compress_molecule_reads_to_snips(
             base2p_wrong = {
                 base: p_wrong
                 for base, p_wrong in base2p_wrong.items()
-                # second condition is basically two or more confident calls
-                if p_wrong <= 100 * best_prob or p_wrong < min(0.001, 1e8 * best_prob)
+                if p_wrong <= best_prob * 1000
             }
 
         # if #candidates is still not one, discard this sample and don't make any call
         if len(base2p_wrong) != 1:
             continue
         for base, p_wrong in base2p_wrong.items():
-            # this loop can be iterated only once
+            # this loop is iterated only once
             compressed_snps.append((snp_position, base, p_wrong))
 
     return p_group_misaligned, compressed_snps
