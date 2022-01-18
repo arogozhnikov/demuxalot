@@ -1,216 +1,12 @@
-from collections import defaultdict
-from copy import deepcopy
-from typing import List, Dict, Tuple
-from warnings import warn
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
-import pysam
 from scipy.special import softmax
 
+from demuxalot.genotypes import ProbabilisticGenotypes
 from demuxalot.snp_counter import CompressedSNPCalls
 from demuxalot.utils import fast_np_add_at_1d, BarcodeHandler, compress_base, FeatureLookup
-
-
-class ProbabilisticGenotypes:
-    def __init__(self, genotype_names: List[str], default_prior=1.):
-        """
-        ProbabilisticGenotypes represents our accumulated knowledge about SNPs for selected genotypes.
-        Can aggregate information from GSA/WGS/WES, our prior guesses and genotype information learnt from RNAseq.
-        Genotype names can't be changed/extended once the object is created.
-        Class can handle more than two options per genomic position.
-        Genotype information is always accumulated, not overwritten.
-        Information is stored as betas (parameters of Dirichlet distribution,
-        akin to coefficients in beta distribution).
-        """
-        self.default_prior: float = default_prior
-        self.var2varid: Dict[Tuple, int] = {}  # chrom, pos, base -> index in variant_betas
-        self.genotype_names: List[str] = list(genotype_names)
-        assert (np.sort(self.genotype_names) == self.genotype_names).all(), 'please order genotype names'
-        self.variant_betas: np.ndarray = np.zeros([32768, self.n_genotypes], 'float32')
-
-    def __repr__(self):
-        chromosomes = {chromosome for chromosome, _, _ in self.var2varid}
-        return f'<Genotypes with {self.n_variants} variants on {len(chromosomes)} ' \
-               f'and {self.n_genotypes} genotypes: \n{self.genotype_names}'
-
-    @property
-    def n_genotypes(self):
-        return len(self.genotype_names)
-
-    @property
-    def n_variants(self) -> int:
-        return len(self.var2varid)
-
-    def get_betas(self) -> np.ndarray:
-        # return readonly view
-        variants_view: np.ndarray = self.variant_betas[: self.n_variants]
-        variants_view.flags.writeable = False
-        return variants_view
-
-    def get_snp_ids_for_variants(self) -> np.ndarray:
-        snp2id = {}
-        result = np.zeros(self.n_variants, dtype='int32') - 1
-        for (chrom, pos, _base), variant_id in self.var2varid.items():
-            snp = chrom, pos
-            if snp not in snp2id:
-                snp2id[snp] = len(snp2id)
-            result[variant_id] = snp2id[snp]
-        assert np.all(result >= 0)
-        assert np.all(result < self.n_variants)
-        return result
-
-    def extend_variants(self, n_samples=1):
-        # pre-allocation of space for new variants
-        while n_samples + self.n_variants > len(self.variant_betas):
-            self.variant_betas = np.concatenate([self.variant_betas, np.zeros_like(self.variant_betas)], axis=0)
-
-    def add_vcf(self, vcf_file_name, prior_strength: float = 100.):
-        """
-        Add information from parsed VCF
-        :param vcf_file_name: path to VCF file. Only diploid values are accepted (0/0, 0/1, 1/1, ./.).
-            Should contain all genotypes of interest. Can contain additional genotypes, but those will be ignored.
-        """
-        n_skipped_snps = 0
-        for snp in pysam.VariantFile(vcf_file_name).fetch():
-            if any(len(option) != 1 for option in snp.alleles):
-                print('skipping non-snp, alleles = ', snp.alleles, snp.chrom, snp.pos)
-                continue
-            self.extend_variants(len(snp.alleles))
-
-            snp_ids = []
-            alleles = snp.alleles
-            if len(set(alleles)) != len(alleles):
-                n_skipped_snps += 1
-                continue
-            if any(allele not in 'ACGT' for allele in alleles):
-                n_skipped_snps += 1
-                continue
-
-            for allele in alleles:
-                # pysam enumerates starting from one, thus -1
-                variant = (snp.chrom, snp.pos - 1, allele)
-                if variant not in self.var2varid:
-                    self.var2varid[variant] = self.n_variants
-                snp_ids.append(self.var2varid[variant])
-
-            assert len(set(snp_ids)) == len(snp_ids), (snp_ids, snp.chrom, snp.pos, snp.alleles)
-
-            contribution = np.zeros([len(snp_ids), self.n_genotypes], dtype='float32')
-            for donor_id, donor in enumerate(self.genotype_names):
-                called_values = snp.samples[donor]['GT']
-                for call in called_values:
-                    if call is not None:
-                        # contribution is split between called values
-                        contribution[call, donor_id] += prior_strength / len(called_values)
-            not_provided = contribution.sum(axis=0) == 0
-            if np.sum(~not_provided) < 2:
-                # at least two genotypes should have SNP
-                n_skipped_snps += 1
-                continue
-
-            confidence_for_skipped = 0.1
-            contribution[:, not_provided] = contribution[:, ~not_provided].mean(axis=1, keepdims=True) \
-                                            * confidence_for_skipped
-            self.variant_betas[snp_ids] += contribution
-        if n_skipped_snps > 0:
-            print('skipped', n_skipped_snps, 'SNVs')
-
-    def add_prior_betas(self, prior_filename, *, prior_strength: float = 1.):
-        """
-        Betas is the way Demultiplexer stores learnt genotypes. It is a parquet file with posterior weights.
-        Parquet are convenient replacement for csv/tsv files, find examples in pandas documentation.
-        :param prior_filename: path to file
-        :param prior_strength: float, controls impact of learnt genotypes.
-        """
-
-        prior_knowledge: pd.DataFrame = pd.read_parquet(prior_filename) * prior_strength
-        print('Provided prior information about genotypes:', [*prior_knowledge.columns])
-        genotypes_not_provided = [
-            genotype for genotype in self.genotype_names if genotype not in prior_knowledge.columns
-        ]
-        if len(genotypes_not_provided) > 0:
-            print(f'No information for genotypes: {genotypes_not_provided}')
-
-        variants = prior_knowledge.index.to_frame()
-        variants = zip(variants['CHROM'], variants['POS'], variants['BASE'])
-
-        variant_indices: List[int] = []
-        for variant in variants:
-            if variant not in self.var2varid:
-                self.extend_variants(1)
-                self.var2varid[variant] = self.n_variants
-            variant_indices.append(self.var2varid[variant])
-
-        for donor_id, donor in enumerate(self.genotype_names):
-            if donor in prior_knowledge.columns:
-                np.add.at(
-                    self.variant_betas[:, donor_id],
-                    variant_indices,
-                    prior_knowledge[donor],
-                )
-
-    def get_chromosome2positions(self):
-        chromosome2positions = defaultdict(list)
-        for chromosome, position, base in self.var2varid:
-            chromosome2positions[chromosome].append(position)
-
-        if len(chromosome2positions) == 0:
-            warn('Genotypes are empty. Did you forget to add vcf/betas?')
-
-        return {
-            chromosome: np.unique(np.asarray(positions, dtype=int))
-            for chromosome, positions
-            in chromosome2positions.items()
-        }
-
-    def _generate_canonical_representation(self):
-        variants_order = []
-        sorted_variant2id = {}
-        for (chrom, pos, base), variant_id in sorted(self.var2varid.items()):
-            variants_order.append(variant_id)
-            sorted_variant2id[chrom, pos, base] = len(variants_order)
-
-        return sorted_variant2id, self.variant_betas[variants_order]
-
-    def get_snp_positions_set(self) -> set:
-        return {(chromosome, position) for chromosome, position, base in self.var2varid}
-
-    def _with_betas(self, external_betas: np.ndarray):
-        """ Return copy of genotypes with updated beta weights """
-        assert external_betas.shape == (self.n_variants, self.n_genotypes)
-        assert external_betas.dtype == self.variant_betas.dtype
-        assert np.min(external_betas) >= 0
-        result: ProbabilisticGenotypes = self.clone()
-        result.variant_betas = external_betas.copy()
-        return result
-
-    def save_betas(self, path_or_buf):
-        """ Save learnt genotypes in the form of beta contributions, can be used later. """
-        index_columns = defaultdict(list)
-        old_variant_order = []
-
-        for (chrom, pos, base), variant_id in sorted(self.var2varid.items()):
-            index_columns['CHROM'].append(chrom)
-            index_columns['POS'].append(pos)
-            index_columns['BASE'].append(base)
-
-            old_variant_order.append(variant_id)
-
-        old_variant_order = np.asarray(old_variant_order)
-        betas = self.variant_betas[:self.n_variants][old_variant_order]
-
-        exported_frame = pd.DataFrame(
-            data=betas,
-            index=pd.MultiIndex.from_frame(pd.DataFrame(index_columns)),
-            columns=self.genotype_names,
-        )
-
-        exported_frame.to_parquet(path_or_buf)
-
-    def clone(self):
-        return deepcopy(self)
-
 
 """
 There are two ways of regularizing EM algorithm.
@@ -409,7 +205,7 @@ class Demultiplexer:
         One can also stop aggregating naive information about number of bases and instead try to employ 
         all probabilities of calls available for each base.
         This is substantially more expensive, but improvements in quality are minor.
-        
+
         Reserved for future experiments, but likely this code will be removed.
         """
 
@@ -424,7 +220,7 @@ class Demultiplexer:
 
         column_names = []
         for pg_index, genotype_name, variant2prob in Demultiplexer._iterate_genotypes_options(
-            genotype_names, genotype_prob, doublet_prior=doublet_prior,
+                genotype_names, genotype_prob, doublet_prior=doublet_prior,
         ):
             column_names += [genotype_name]
             p = variant2prob[molecule_calls['variant_id']]
@@ -445,7 +241,7 @@ class Demultiplexer:
         ]
         barcode_posterior_logits = np.stack(barcode_posterior_logits, axis=1)
 
-        return barcode_posterior_logits , column_names
+        return barcode_posterior_logits, column_names
 
     @staticmethod
     def compute_barcode_logits_using_barcode_calls(
@@ -454,11 +250,11 @@ class Demultiplexer:
     ):
         # n_barcodes x n_genotypes
         barcode_posterior_logits = np.zeros([n_barcodes, 1], dtype='float32') \
-            + Demultiplexer._doublet_penalties(n_genotypes, doublet_prior=doublet_prior)
+                                   + Demultiplexer._doublet_penalties(n_genotypes, doublet_prior=doublet_prior)
 
         column_names = []
         for pg_index, genotype_name, variant2prob in Demultiplexer._iterate_genotypes_options(
-            genotype_names, genotype_prob=genotype_prob, doublet_prior=doublet_prior
+                genotype_names, genotype_prob=genotype_prob, doublet_prior=doublet_prior
         ):
             column_names += [genotype_name]
             p = variant2prob[barcode_calls['variant_id']]
@@ -499,7 +295,8 @@ class Demultiplexer:
             barcode_variant_counts,
             barcode_snp_count,
         ],
-            names=['variant_id', 'snp_id', 'compressed_cb', 'p_base_wrong', 'barcode_variant_count', 'barcode_snp_count']
+            names=['variant_id', 'snp_id', 'compressed_cb', 'p_base_wrong', 'barcode_variant_count',
+                   'barcode_snp_count']
         )
 
     @staticmethod

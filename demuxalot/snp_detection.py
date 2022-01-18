@@ -6,8 +6,8 @@ import pysam
 from joblib import Parallel, delayed
 from pathlib import Path
 
-from . import cellranger_specific
-from .demux import ProbabilisticGenotypes, BarcodeHandler, Demultiplexer
+from . import cellranger_specific, ProbabilisticGenotypes
+from .demux import BarcodeHandler, Demultiplexer
 from .snp_counter import count_snps, CompressedSNPCalls
 from .utils import as_str
 
