@@ -239,6 +239,7 @@ def count_call_variants_for_chromosome(
         parse_read,
         start=None,
         stop=None,
+        **kwargs
 ) -> Tuple[str, CompressedSNPCalls]:
     prev_segment = None
     compressed_snp_calls = CompressedSNPCalls()
@@ -248,7 +249,7 @@ def count_call_variants_for_chromosome(
         bamfile_or_filename = pysam.AlignmentFile(as_str(bamfile_or_filename))
 
     for read in bamfile_or_filename.fetch(chromosome, start=start, stop=stop):
-        parsed = parse_read(read)
+        parsed = parse_read(read, **kwargs)
         if parsed is None:
             continue
         cb = barcode_handler.get_barcode_index(read)
@@ -283,6 +284,7 @@ def count_snps(
         joblib_n_jobs=-1,
         joblib_verbosity=11,
         parse_read=parse_read,
+        **kwargs
 ) -> Dict[str, CompressedSNPCalls]:
     """
     Computes which molecules can provide information about SNPs
@@ -294,6 +296,7 @@ def count_snps(
     :param joblib_n_jobs: how many threads to run in parallel
     :param joblib_verbosity: verbosity level as interpreted by joblib
     :param parse_read: callback that checks if read should be discarded and parses necessary quantities
+    :param **kwargs: optional keyword arguments to pass down to parse_read callback
 
     see cellranger_specific.py for example of callbacks specific for cellranger
 
@@ -311,6 +314,7 @@ def count_snps(
                 stop=stop,
                 barcode_handler=barcode_handler,
                 parse_read=parse_read,
+                **kwargs
             )
             for bamfile, chromosome, start, stop, positions, barcode_handler in jobs
         )
