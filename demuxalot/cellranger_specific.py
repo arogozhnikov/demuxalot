@@ -10,24 +10,27 @@ from typing import Optional, Tuple
 from demuxalot.utils import hash_string
 
 
-def parse_read(read: AlignedRead) -> Optional[Tuple[float, int]]:
+def parse_read(read: AlignedRead, umi_tag="UB", nhits_tag="NH", score_tag="AS",
+               score_diff_max = 8, mapq_threshold = 20,
+               # max. 2 edits --^
+               p_misaligned_default = 0.01) -> Optional[Tuple[float, int]]:
     """
     returns None if read should be ignored.
     Read still can be ignored if it is not in the barcode list
     """
-    if read.get_tag("AS") <= len(read.seq) - 8:
-        # more than 2 edits
+    if read.get_tag(score_tag) <= len(read.seq) - score_diff_max:
+        # too many edits
         return None
-    if read.get_tag("NH") > 1:
+    if read.get_tag(nhits_tag) > 1:
         # multi-mapped
         return None
-    if not read.has_tag("UB"):
+    if not read.has_tag(umi_tag):
         # does not have molecule barcode
         return None
-    if read.mapq < 20:
+    if read.mapq < mapq_threshold:
         # this one should not be triggered because of NH, but just in case
         return None
 
-    p_misaligned = 0.01  # default value
-    ub = hash_string(read.get_tag("UB"))
+    p_misaligned = p_misaligned_default  # default value
+    ub = hash_string(read.get_tag(umi_tag))
     return p_misaligned, ub
