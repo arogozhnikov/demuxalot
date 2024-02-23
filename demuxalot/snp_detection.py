@@ -28,7 +28,6 @@ def detect_snps_for_chromosome(
         minimum_alternative_coverage: int,
         max_snp_candidates: int = 10000,
         minimum_fraction_of_ref_and_alt=0.98,
-        **kwargs
 ):
     # stage1. straightforward counting, to detect possible candidates for snp
     coverage = 0
@@ -38,7 +37,7 @@ def detect_snps_for_chromosome(
             # size = 4 x positions (first axis enumerates "ACTG"))
             coverage = coverage + np.asarray(
                 bamfile.count_coverage(chromosome, start=start, stop=stop,
-                                       read_callback=lambda read: parse_read(read, **kwargs) is not None),
+                                       read_callback=lambda read: parse_read(read) is not None),
                 dtype="int32"
             )
 
@@ -66,7 +65,6 @@ def detect_snps_for_chromosome(
         parse_read=parse_read,
         joblib_n_jobs=None,  # we are already inside joblib job
         joblib_verbosity=0,
-        **kwargs
     )
     if len(compressed_snp_calls) == 0:
         return []
@@ -144,7 +142,6 @@ def detect_snps_positions(
         ignore_known_snps=True,
         max_fragment_step=10_000_000,
         joblib_verbosity=11,
-        **kwargs
 ):
     """
     Detects SNPs based on data.
@@ -158,7 +155,6 @@ def detect_snps_positions(
         joblib_n_jobs=joblib_n_jobs,
         parse_read=parse_read,
         joblib_verbosity=joblib_verbosity,
-        **kwargs
     )
 
     _likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
@@ -194,7 +190,6 @@ def detect_snps_positions(
                 minimum_alternative_fraction=minimum_alternative_fraction,
                 barcode_handler=barcode_handler,
                 regularization=regularization,
-                **kwargs
             )
             for chromosome, length in chromosomes
             for start in range(0, length, max_fragment_step)
