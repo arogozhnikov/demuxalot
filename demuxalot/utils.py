@@ -77,12 +77,13 @@ class BarcodeHandler:
         return self.barcode2index.get(barcode, None)
 
     @staticmethod
-    def from_file(barcodes_filename):
+    def from_file(barcodes_filename, **kwargs):
         """
         :param barcodes_filename: path to barcodes.csv or barcodes.csv.gz where each line is a barcode
+        :param **kwargs: optional additional keyword arguments to pass down to BarcodeHandler.__init__
         """
         barcodes = pd.read_csv(barcodes_filename, header=None)[0].values
-        return BarcodeHandler(barcodes)
+        return BarcodeHandler(barcodes, **kwargs)
 
     def filter_to_rg_value(self, rg_value):
         """ Create a copy of this handler with only barcodes specific to one original file described by RG tag """
