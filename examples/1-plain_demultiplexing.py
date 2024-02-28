@@ -1,6 +1,5 @@
 """
-Simple demultiplexing
-with known genotypes.
+Simple demultiplexing with known genotypes.
 """
 from demuxalot import Demultiplexer, BarcodeHandler, ProbabilisticGenotypes, count_snps
 

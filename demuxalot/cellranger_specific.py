@@ -1,6 +1,6 @@
 """
 This file defines callbacks that are optimized for cellranger
-and can overcome some of issues in cellranger output.
+and can overcome some of the issues in cellranger output.
 
 If some other aligner is used, you can use simpler callbacks (e.g. using only mapq).
 """
