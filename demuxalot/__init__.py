@@ -1,5 +1,4 @@
-__version__ = '0.4.0'
-__author__ = 'Alex Rogozhnikov'
+__version__ = '0.4.1'
 
 from .utils import BarcodeHandler
 from .snp_counter import count_snps
