@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "demuxalot"
+
+description = "Scalable and reliable demulitplexing for single-cell RNA sequencing."
+readme = "README.md"
+requires-python = ">=3.8"
+
+keywords = [
+    "genotype learning",
+    "single cell RNA sequencing",
+    "demultiplexing",
+    "bayesian modelling",
+]
+
+license = { text = "MIT" }
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = [
+    "pysam", # reads BAM files (alignment)
+    "scipy",
+    "numpy",
+    "joblib", # multiprocessing in separate processes
+    "pandas",
+    "pyarrow", # required to read and write parquet files
+]
+dynamic = ["version"]
+authors = [{ name = "Alex Rogozhnikov, System1 Biosciences" }]
+
+[project.urls]
+Homepage = "https://github.com/arogozhnikov/demuxalot"
+
+[tool.setuptools]
+packages = ["demuxalot"]
+
+[tool.hatch.version]
+path = "demuxalot/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.github",
+    "/.idea",
+    "/.pytest_cache",
+    "/build",
+    "/dist",
+    "/tests",
+    "/examples",
+]
+
+[tool.hatch.build.targets.wheel]
+# should use packages from main section
+
+
+[tool.hatch.envs.pypi.scripts]
+# hatch run pypi:deploy_test
+deploy_test = "hatch build --clean && hatch publish -r test"
+deploy = "hatch build --clean && hatch publish"
+
+
+[tool.hatch.envs.testing.scripts]
+# hatch run testing:test
+test = "pytest tests"
+
+
+[tool.ruff]
+line-length = 120
