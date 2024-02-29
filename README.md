@@ -2,14 +2,15 @@
 <img width="500" alt="demuxalot_logo_small" src="https://user-images.githubusercontent.com/6318811/118947887-a261da00-b90c-11eb-8932-a66e6d2caa1f.png">
 </p>
  
-[![Run tests and deploy](https://github.com/herophilus/demuxalot/actions/workflows/run_test.yml/badge.svg)](https://github.com/herophilus/demuxalot/actions/workflows/run_test.yml)
+[![Run tests and deploy](https://github.com/arogozhnikov/demuxalot/actions/workflows/run_test.yml/badge.svg)](https://github.com/arogozhnikov/demuxalot/actions/workflows/run_test.yml)
 <img src="./.github/python_badge.svg">
 # Demuxalot 
 
-Reliable and efficient idenfitication of genotypes for individual cells 
-in RNA sequencing that refines the knowledge about genotypes from the data.
+Reliable and efficient identification of genotypes for individual cells in RNA sequencing.
+Demuxalot refines its knowledge about genotypes directly from the data.
 
-Demuxalot is fast and optimized to work with lots of genotypes.
+Demuxalot is fast and optimized to work with lots of genotypes, 
+enabling efficient reutilization of inferred information from the data.
 
 Preprint [is available at biorxiv.](https://www.biorxiv.org/content/10.1101/2021.05.22.443646v2)
 
@@ -23,9 +24,7 @@ During single-cell RNA-sequencing (scRnaSeq) we pool cells from different donors
 
 Demuxalot solves the con: 
 it guesses genotype of each cell by matching reads coming from cell against genotypes. 
-This is called *demuxltiplexing*.
-
-Herophilus uses scRnaSeq to study cells in organoids with multiple genetic backgrounds at scale.
+This is called *demultiplexing*.
 
 ## Comparisons
 
@@ -45,17 +44,17 @@ Typical approach to get genotype-specific mutations are
   - so you just go straight to demultiplexing
   - demuxlet solves this case
 - Bead arrays (aka SNP arrays aka DNA microarrays) are super cheap and practically more relevant
-  - you get information about 50k to 650k most common SNPs, and that's only a small fraction, but you also pay very little
+  - you get information about ~650k most common SNPs, and that's only a small fraction, but you also pay very little
   - this case is covered by `demuxalot` (this package)
   - [Illumina's video](https://www.youtube.com/watch?v=lVG04dAAyvY) about this technology
 
 ## Why is it worth refining genotypes? 
    
-SNP array provides up to ~650k (as of 2021) positions in the genome.
+SNP array provides up to ~650k positions in the genome.
 Around 20-30% of them would be specific for a genotype (i.e. deviate from majority).
 
-- Each genotype has around 10 times more SNV (single nucleotide variations) 
-  that are not captured by array. Some of this missing SNPs are very valuable for demultiplexing
+Each genotype has around 10 times more SNV (single nucleotide variations) that are not captured by array. 
+Some of these missing SNPs are very valuable for demultiplexing.
 
 ## What's special power of demuxalot?
 
@@ -71,15 +70,9 @@ Around 20-30% of them would be specific for a genotype (i.e. deviate from majori
 
 ## Installation
 
-Package is pip-installable. Requires python >= 3.6
+Plain and simple:
 ```bash
-pip install demuxalot
-```
-
-Developer installation:
-```bash
-git clone https://github.com/herophilus/demuxalot
-cd demuxalot && pip install -e .
+pip install demuxalot # Requires python >= 3.8
 ```
 
 Here are some common scenarios and how they are implemented in demuxalot.
@@ -117,6 +110,7 @@ likelihoods, posterior_probabilities = Demultiplexer.predict_posteriors(
 
 Refinement of known genotypes is shown in a notebook, see `examples/`
 
+
 ## Saving/loading genotypes
    
 ```python
@@ -126,13 +120,22 @@ refined_genotypes = ProbabilisticGenotypes(genotype_names= <list which genotypes
 refined_genotypes.add_prior_betas('learnt_genotypes.parquet')
 ```
 
-## Re-saving VCF genotypes with betas (optional, recommended)
 
-Generally makes sense to export VCF to internal format only when you plan to load it many times.
-Loading of internal format is *much* faster than parsing/validating VCF. 
+## Re-saving VCF genotypes with betas (recommended)
+
+Loading of internal parquet-based format is *much* faster than parsing/validating VCF.
+Makes sense to export VCF to internal format in two cases:
+
+1. when you plan to load it many times.
+2. when you want to 'accumulate' inferred information about genotypes from multiple scnraseq runs
+ 
 
 ```python
 genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
 genotypes.add_vcf('path/to/genotypes.vcf')
 genotypes.save_betas('learnt_genotypes.parquet')
+
+# later you can use it. 
+genotypes = ProbabilisticGenotypes(genotype_names=['Donor1', 'Donor2', 'Donor3'])
+genotypes.add_prior_betas('learnt_genotypes.parquet')
 ```
