@@ -1,6 +1,6 @@
 """
-This file defines callbacks that are optimized for cellranger
-and can overcome some of the issues in cellranger output.
+This file defines callbacks that are optimized for BD Rhapsody WTA (RNA) assays
+and can overcome some of the issues in BD Rhapsody output.
 
 If some other aligner is used, you can use simpler callbacks (e.g. using only mapq).
 """
