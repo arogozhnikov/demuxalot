@@ -82,7 +82,7 @@ class BarcodeHandler:
         :param barcodes_filename: path to barcodes.csv or barcodes.csv.gz where each line is a barcode
         :param **kwargs: optional additional keyword arguments to pass down to BarcodeHandler.__init__
         """
-        barcodes = pd.read_csv(barcodes_filename, header=None)[0].values
+        barcodes = pd.read_csv(barcodes_filename, header=None)[0].values.astype("str")
         return BarcodeHandler(barcodes, **kwargs)
 
     def filter_to_rg_value(self, rg_value):
