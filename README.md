@@ -33,6 +33,8 @@ Below is a benchmark on PMBC data with 32 donors from [preprint](https://www.bio
 
 <img width="1434" alt="Screen Shot 2021-06-03 at 6 03 12 PM" src="https://user-images.githubusercontent.com/6318811/120730293-07cdd300-c496-11eb-8a9c-62c8b8cf9847.png">
 
+Remark: we used `demuxalot` internally for a number of challenging scenarios with a large biobank and low-depth sequencing, 
+and it shines in these scenarios too. Actually, that's why it was created in the first place.
 
 
 ## Known genotypes and refined genotypes: the tale of two scenarios
