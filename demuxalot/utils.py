@@ -18,8 +18,8 @@ def hash_string(s) -> int:
     for c in s:
         result *= 5
         result += ord(c)
-    return result
-
+    # make sure we fit into int32, as a residue by largest prime below 2 ** 32 - 1
+    return result % 2147483629
 
 base_lookup = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': 4}
 
@@ -32,7 +32,7 @@ def decompress_base(base_index: int) -> str:
     return 'ACGTN'[base_index]
 
 
-def fast_np_add_at_1d(x, indices, weights):
+def fast_np_add_at_1d(x, indices, weights) -> None:
     x[:] = x + np.bincount(indices, weights=weights, minlength=len(x))
 
 
