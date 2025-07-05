@@ -87,7 +87,7 @@ class CompressedSNPCalls:
         self.n_molecules = 0
         self.molecules = np.array(
             [(-1, -1, -1.)] * start_molecule_size,
-            dtype=[('compressed_cb', 'int32'), ('compressed_ub', 'int32'), ('p_group_misaligned', 'float32')]
+            dtype=[('compressed_cb', 'int64'), ('compressed_ub', 'int64'), ('p_group_misaligned', 'float32')]
         )
 
         self.n_snp_calls = 0
