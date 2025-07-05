@@ -1,4 +1,4 @@
-__version__ = '0.4.1'
+__version__ = '0.4.3'
 
 from .utils import BarcodeHandler
 from .snp_counter import count_snps
