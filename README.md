@@ -14,6 +14,13 @@ enabling efficient reutilization of inferred information from the data.
 
 Preprint [is available at biorxiv.](https://www.biorxiv.org/content/10.1101/2021.05.22.443646v2)
 
+
+> [!NOTE]
+> My friend recently released a python package to perform single-cell analysis 
+> efficiently and without requiring a ton of RAM.
+> Sounds interesting? Then give it a try: https://github.com/slaf-project/slaf
+
+
 ## Background
 
 During single-cell RNA-sequencing (scRnaSeq) we pool cells from different donors and process them together.
